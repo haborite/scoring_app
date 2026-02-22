@@ -5,8 +5,11 @@ use crate::models::{Config, Question, Score};
 pub fn ScoreRow(
     question_id: u32,
     cur_student_idx: ReadSignal<usize>,
-    cur_question_idx: Signal<usize>,
+    qidx: usize,
     config: Signal<Config>,
+    is_focused: bool,
+    move_to_next: EventHandler<()>,
+    move_to_prev: EventHandler<()>,
 ) -> Element {
 
     let student_id = config().students.get(cur_student_idx()).map(|s| s.id.to_string()).unwrap_or_default();
@@ -26,7 +29,7 @@ pub fn ScoreRow(
             div { class: "font-semibold truncate", "{q_name}" }
 
             input {
-                id: "score-{cur_student_idx()}-{cur_question_idx()}",
+                id: "score-{qidx}",
                 r#type: "number",
                 value: config().scores
                     .iter()
@@ -36,7 +39,7 @@ pub fn ScoreRow(
                 max: full,
                 required: true,
                 class: "input validator",
-                autofocus: true,
+                autofocus: is_focused,
 
                 oninput: move |e| {
                     println!("on input: question_id={question_id}, value={}", e.value());
@@ -79,24 +82,15 @@ pub fn ScoreRow(
                     match e.key() {
                         Key::Enter | Key::ArrowDown => {
                             e.prevent_default();
-                            let len = config().questions.len();
-                            if len > 0 {
-                                cur_question_idx.set((cur_question_idx() + 1).min(len - 1));
-                            }
+                            move_to_next.call(());
                         },
                         Key::ArrowUp => {
                             e.prevent_default();
-                            let i = cur_question_idx();
-                            cur_question_idx.set(i.saturating_sub(1));
-                        }
+                            move_to_prev.call(());
+                        },
                         _ => {}
                     }
                 },
-
-                onblur: {
-                    move |_| {}
-                },
-
             }
             p { class: "validator-hint", "Must be between be 0 to {full}" }
 

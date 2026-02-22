@@ -11,7 +11,6 @@ pub fn GradingPage(
 
     // navigation
     let cur_student_idx = use_signal(|| 0usize);
-    let cur_question_idx = use_signal(|| 0usize);
 
     // search popup
     let mut search_open = use_signal(|| false);
@@ -23,18 +22,7 @@ pub fn GradingPage(
     // Table row
     let mut table_rows: Signal<Vec<TableRow>> = use_signal(|| Vec::new());
 
-    use_effect(move || {
-        let js = format!(
-            r#"queueMicrotask(() => {{
-                const el = document.getElementById("score-{cur_student_idx}-{cur_question_idx}");
-                if (el) {{
-                    el.focus();
-                    if (el.select) el.select();
-                }}
-            }});"#
-        );
-        let _ = document::eval(&js);
-    });
+
 
     use_effect(move || {
 
@@ -150,7 +138,7 @@ pub fn GradingPage(
 
                 ScoreRows {
                     cur_student_idx,
-                    cur_question_idx,
+                    // cur_question_idx,
                     config,
                 }
 
@@ -225,7 +213,7 @@ pub fn GradingPage(
                             msg, 
                             config, 
                             cur_student_idx, 
-                            focus_idx: cur_question_idx
+                            // focus_idx: cur_question_idx
                         }
                     }
                 )

@@ -7,7 +7,7 @@ pub fn SearchWindow(
     msg: Signal<String>,
     config: Signal<Config>,
     cur_student_idx: Signal<usize>,
-    focus_idx: Signal<usize>,
+    // focus_idx: Signal<usize>,
 ) -> Element {
     let mut search_q = use_signal(String::new);
     let mut search_results = use_signal(|| Vec::<Student>::new());
@@ -51,7 +51,7 @@ pub fn SearchWindow(
         let mut is_open = is_open;
         let mut msg = msg;
         let mut cur_student_idx = cur_student_idx;
-        let mut focus_idx = focus_idx;
+        // let mut focus_idx = focus_idx;
         move |sid: String| {
             if let Some(pos) = config().students.iter().position(|x| x.id == sid) {
                 cur_student_idx.set(pos);
@@ -59,7 +59,7 @@ pub fn SearchWindow(
                 msg.set("選択した学生が見つかりません（一覧が更新された可能性）".to_string());
             }
             is_open.set(false);
-            focus_idx.set(0);
+            // focus_idx.set(0);
         }
     };
 
