@@ -4,10 +4,10 @@ use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub struct QuestionRow {
-    pub id: String,
+    pub id: u32,
     pub name: String,
-    pub full_score: i64,
-    pub weight: f64,
+    pub full_score: u32,
+    pub weight: f32,
     pub comment: String,
 }
 
@@ -70,10 +70,10 @@ impl Db {
         let mut out = Vec::with_capacity(rows.len());
         for r in rows {
             out.push(QuestionRow {
-                id: r.try_get::<String, _>("id")?,
+                id: r.try_get::<u32, _>("id")?,
                 name: r.try_get::<String, _>("name")?,
-                full_score: r.try_get::<i64, _>("full_score")?,
-                weight: r.try_get::<f64, _>("weight")?,
+                full_score: r.try_get::<u32, _>("full_score")?,
+                weight: r.try_get::<f32, _>("weight")?,
                 comment: r.try_get::<String, _>("comment")?
             });
         }
@@ -254,7 +254,7 @@ impl Db {
     pub async fn get_scores_for_student(
         &self,
         student_id: &str,
-    ) -> Result<Vec<(String, Option<i64>)>> {
+    ) -> Result<Vec<(String, Option<u32>)>> {
         let rows = sqlx::query(
             r#"
             SELECT q.id as qid, sc.score as score
@@ -271,7 +271,7 @@ impl Db {
         let mut out = Vec::with_capacity(rows.len());
         for r in rows {
             let qid: String = r.try_get("qid")?;
-            let score: Option<i64> = r.try_get("score")?;
+            let score: Option<u32> = r.try_get("score")?;
             out.push((qid, score));
         }
         Ok(out)
@@ -279,10 +279,11 @@ impl Db {
 
     pub async fn set_score(
         &self,
-        student_id: &str,
-        question_id: &str,
-        score: Option<i64>,
+        student_id: String,
+        question_id: u32,
+        score: Option<u32>,
     ) -> Result<()> {
+        let question_id = &question_id.to_string();
         sqlx::query(
             r#"
             INSERT INTO scores(student_id, question_id, score)
@@ -300,7 +301,7 @@ impl Db {
         Ok(())
     }
 
-    pub async fn search_students(&self, q: &str, limit: i64) -> Result<Vec<StudentRow>> {
+    pub async fn search_students(&self, q: &str, limit: u32) -> Result<Vec<StudentRow>> {
         let pat = format!("%{}%", q);
 
         let rows = sqlx::query(
@@ -327,15 +328,15 @@ impl Db {
         Ok(out)
     }
 
-    pub async fn count_total_students(&self) -> Result<i64> {
+    pub async fn count_total_students(&self) -> Result<u32> {
         let r = sqlx::query(r#"SELECT COUNT(*) as n FROM students"#)
             .fetch_one(&self.pool)
             .await?;
-        let n: i64 = r.try_get("n")?;
+        let n: u32 = r.try_get("n")?;
         Ok(n)
     }
 
-    pub async fn count_completed_students(&self) -> Result<i64> {
+    pub async fn count_completed_students(&self) -> Result<u32> {
         let r = sqlx::query(
             r#"
             SELECT COUNT(*) as n
@@ -352,7 +353,7 @@ impl Db {
         .fetch_one(&self.pool)
         .await?;
 
-        let n: i64 = r.try_get("n")?;
+        let n: u32 = r.try_get("n")?;
         Ok(n)
     }
 
@@ -372,7 +373,7 @@ impl Db {
         Ok(())
     }
 
-    pub async fn list_completion_times_latest(&self, limit: i64) -> Result<Vec<String>> {
+    pub async fn list_completion_times_latest(&self, limit: u32) -> Result<Vec<String>> {
         let rows = sqlx::query(
             r#"
             SELECT finished_at
@@ -395,7 +396,7 @@ impl Db {
 
     pub async fn fetch_table_join_all(
         &self,
-    ) -> Result<Vec<(String, String, String, Option<i64>, i64, f64)>> {
+    ) -> Result<Vec<(String, String, String, Option<u32>, u32, f32)>> {
         let rows = sqlx::query(
             r#"
             SELECT
@@ -420,9 +421,9 @@ impl Db {
             let sid: String = r.try_get("sid")?;
             let sname: String = r.try_get("sname")?;
             let qid: String = r.try_get("qid")?;
-            let score: Option<i64> = r.try_get("score")?;
-            let full_score: i64 = r.try_get("full_score")?;
-            let weight: f64 = r.try_get("weight")?;
+            let score: Option<u32> = r.try_get("score")?;
+            let full_score: u32 = r.try_get("full_score")?;
+            let weight: f32 = r.try_get("weight")?;
             out.push((sid, sname, qid, score, full_score, weight));
         }
         Ok(out)
@@ -431,9 +432,6 @@ impl Db {
 
 // ---- validation helpers ----
 fn validate_question(q: &QuestionRow) -> Result<()> {
-    if q.id.trim().is_empty() {
-        anyhow::bail!("question.id is empty");
-    }
     if q.name.trim().is_empty() {
         anyhow::bail!("question.name is empty");
     }

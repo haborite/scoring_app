@@ -1,215 +1,226 @@
 use dioxus::prelude::*;
-use rfd::FileDialog;
-
-use crate::{
-    csv_import::{preview_questions, read_questions_csv},
-    db::{Db, QuestionRow},
-};
+use crate::models::{Config, Question};
 
 #[component]
-pub fn MasterQuestionsPage(on_back: EventHandler<()>) -> Element {
-    let db = use_context::<Db>();
-    let questions = use_signal(Vec::<QuestionRow>::new);
-    let msg = use_signal(|| String::new());
+pub fn MasterQuestionsPage(
+    on_back: EventHandler<()>,
+    config: Signal<Config>,
+) -> Element {
 
-    // 手入力フォーム
-    let mut form_id = use_signal(|| String::new());
-    let mut form_name = use_signal(|| String::new());
-    let mut form_full = use_signal(|| String::new());
-    let mut form_weight = use_signal(|| String::new());
-    let mut form_comment = use_signal(|| String::new());
+    rsx! {
+        div { class: "p-4 space-y-4",
 
-    // 初期ロード
-    {
-        let db = db.clone();
-        let questions = questions.clone();
-        let msg = msg.clone();
-        use_effect(move || {
-            let db = db.clone();
-            let mut questions = questions.clone();
-            let mut msg = msg.clone();
-            spawn(async move {
-                match db.list_questions().await {
-                    Ok(qs) => questions.set(qs),
-                    Err(e) => msg.set(format!("DB load error: {e:#}")),
+            div { class: "flex items-center gap-2",
+                button {
+                    class: "btn btn-sm",
+                    onclick: move |_| on_back.call(()),
+                    "Back"
                 }
-            });
-        });
-    }
+                h2 { class: "text-lg font-bold", "Import / Edit Questions" }
+            }
 
-    let refresh = {
-        let db = db.clone();
-        let questions = questions.clone();
-        let msg = msg.clone();
-        move || {
-            let db = db.clone();
-            let mut questions = questions.clone();
-            let mut msg = msg.clone();
-            spawn(async move {
-                match db.list_questions().await {
-                    Ok(qs) => {
-                        questions.set(qs);
-                        msg.set("".to_string());
-                    }
-                    Err(e) => msg.set(format!("DB load error: {e:#}")),
-                }
-            });
-        }
-    };
+            // import panel
+            div { class: "card bg-base-100 shadow",
+                div { class: "card-body p-4 space-y-3",
 
-    let on_import = {
-        let db = db.clone();
-        let questions = questions.clone();
-        let mut msg = msg.clone();
-        move |_| {
-            if let Some(path) = FileDialog::new()
-                .add_filter("CSV", &["csv"])
-                .pick_file()
-            {
-                let path2 = path.clone();
-                // CSV読み込みは同期なので別スレでも良いが、まずは単純に
-                match read_questions_csv(&path2) {
-                    Ok(rows) => {
-                        let preview = preview_questions(&rows, 5);
-                        msg.set(format!(
-                            "CSV loaded: {} rows. Preview: {} rows. Importing...",
-                            rows.len(),
-                            preview.len()
-                        ));
-                        let db = db.clone();
-                        let mut questions = questions.clone();
-                        let mut msg = msg.clone();
-                        spawn(async move {
-                            match db.upsert_questions(&rows).await {
-                                Ok(affected) => {
-                                    msg.set(format!("Import done. affected rows: {affected}"));
-                                    if let Ok(qs) = db.list_questions().await {
-                                        questions.set(qs);
+                    div { class: "flex flex-wrap items-center gap-2",
+                        input {
+                            id: "questions_import",
+                            r#type: "file",
+                            accept: "application/json,.json",
+                            class: "file-input file-input-bordered file-input-sm w-full max-w-md",
+                        }
+                        button {
+                            class: "btn btn-sm btn-primary",
+                            onclick: move |_| {
+                                spawn(async move {
+                                    let txt = match read_questions_json_text().await {
+                                        Ok(Some(s)) => s,
+                                        Ok(None) => return, // canceled / no file
+                                        Err(_) => return,
+                                    };
+                                    if txt.trim().is_empty() {
+                                        return;
                                     }
-                                }
-                                Err(e) => msg.set(format!("Import error: {e:#}")),
-                            }
-                        });
+
+                                    // 通常の Config 形式として読むが questions だけ使う
+                                    let parsed: Result<Config, _> = serde_json::from_str(&txt);
+                                    let Ok(cfg) = parsed else {
+                                        return;
+                                    };
+
+                                    // Signal<Vec<Question>> を差し替え
+                                    config.write().questions = cfg.questions;
+                                });
+                            },
+                            "Import JSON"
+                        }
+
+                        div { class: "flex-1" }
+
+                        button { 
+                            class: "btn btn-sm", 
+                            onclick: move |_| {
+                                // 追加：max(id)+1
+                                let mut qs = config.read().questions.clone();
+                                let next_id = qs.iter().map(|q| q.id).max().unwrap_or(0).saturating_add(1);
+
+                                qs.push(Question {
+                                    id: next_id,
+                                    name: String::new(),
+                                    full_score: 0,
+                                    weight: 1.0,
+                                    comment: String::new(),
+                                });
+
+                                config.write().questions = qs;
+                            }, 
+                            "Add row" 
+                        }
+                        button { 
+                            class: "btn btn-sm btn-ghost", 
+                            onclick: move |_| {
+                                config.write().questions = Vec::new();
+                            }, 
+                            "Clear" 
+                        }
                     }
-                    Err(e) => msg.set(format!("CSV parse error: {e:#}")),
+
+                    p { class: "text-sm opacity-70",
+                        "JSON format is the same as the normal config file. Only "
+                        code { "questions" }
+                        " will be imported; "
+                        code { "students/scores" }
+                        " are ignored."
+                    }
+                }
+            }
+
+            // table
+            div { class: "card bg-base-100 shadow",
+                div { class: "card-body p-2",
+                    div { class: "overflow-x-auto",
+                        table { class: "table table-zebra w-full",
+                            thead {
+                                tr {
+                                    th { class: "w-24", "id" }
+                                    th { class: "w-64", "name" }
+                                    th { class: "w-32", "full_score" }
+                                    th { class: "w-32", "weight" }
+                                    th { "comment" }
+                                    th { class: "w-24", "" }
+                                }
+                            }
+                            tbody {
+                                for (idx, _q) in config.read().questions.iter().cloned().enumerate() {
+                                    QuestionRow { key: "{idx}", idx, config }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
-    };
+    }
+}
 
-    let on_add = {
-        let db = db.clone();
-        let mut msg = msg.clone();
-        let questions = questions.clone();
-        let form_id = form_id.clone();
-        let form_name = form_name.clone();
-        let form_full = form_full.clone();
-        let form_weight = form_weight.clone();
-        let form_comment = form_comment.clone();
-
-        move |_| {
-            let id = form_id.read().trim().to_string();
-            let name = form_name.read().trim().to_string();
-            let full_score: i64 = match form_full.read().trim().parse() {
-                Ok(v) => v,
-                Err(_) => {
-                    msg.set("full_score は整数で入力してください".to_string());
-                    return;
-                }
-            };
-            let weight: f64 = match form_weight.read().trim().parse() {
-                Ok(v) => v,
-                Err(_) => {
-                    msg.set("weight は数値で入力してください".to_string());
-                    return;
-                }
-            };
-            let comment = form_comment.read().trim().to_string();
-
-            let row = QuestionRow { id, name, full_score, weight, comment };
-            let db = db.clone();
-            let mut msg = msg.clone();
-            let mut questions = questions.clone();
-            spawn(async move {
-                match db.insert_question(&row).await {
-                    Ok(_) => {
-                        msg.set("added".to_string());
-                        if let Ok(qs) = db.list_questions().await {
-                            questions.set(qs);
-                        }
-                    }
-                    Err(e) => msg.set(format!("add error: {e:#}")),
-                }
-            });
-        }
+#[component]
+pub fn QuestionRow(
+    idx: usize,
+    config: Signal<Config>,
+) -> Element {
+    let q = config.read().questions.get(idx).cloned();
+    let Some(q) = q else {
+        return rsx! {};
     };
 
     rsx! {
-        div { style: "padding:16px; font-family: sans-serif;",
-            div { style: "display:flex; align-items:center; gap:12px;",
-                button { onclick: move |_| on_back.call(()), "戻る" }
-                h2 { "問題マスタ" }
-                button { onclick: on_import, "CSVインポート（upsert）" }
-                button { onclick: move |_| refresh(), "再読み込み" }
-            }
-
-            if !msg.read().is_empty() {
-                p { style: "color:#b00; margin-top:8px;", "{msg}" }
-            }
-
-            h3 { style: "margin-top:16px;", "手入力で追加（idは追加時のみ）" }
-            div { style: "display:flex; gap:8px; flex-wrap:wrap; align-items:center;",
+        tr {
+            td {
                 input {
-                    placeholder: "id (例: Q1)",
-                    value: "{form_id}",
-                    oninput: move |e| form_id.set(e.value()),
-                }
-                input {
-                    placeholder: "name (例: 問1)",
-                    value: "{form_name}",
-                    oninput: move |e| form_name.set(e.value()),
-                }
-                input {
-                    placeholder: "full_score (例: 10)",
-                    value: "{form_full}",
-                    oninput: move |e| form_full.set(e.value()),
-                }
-                input {
-                    placeholder: "weight (例: 1.0)",
-                    value: "{form_weight}",
-                    oninput: move |e| form_weight.set(e.value()),
-                }
-                input {
-                    placeholder: "comment",
-                    value: "{form_comment}",
-                    oninput: move |e| form_comment.set(e.value()),
-                }
-                button { onclick: on_add, "追加" }
-            }
-
-            h3 { style: "margin-top:16px;", "一覧（編集は次ステップで追加）" }
-            table { border: "1", padding: "6",
-                thead {
-                    tr {
-                        th { "id" }
-                        th { "name" }
-                        th { "full" }
-                        th { "weight" }
-                        th { "comment" }
+                    class: "input input-bordered input-sm w-20",
+                    r#type: "number",
+                    value: "{q.id}",
+                    oninput: move |ev| {
+                        let v = ev.value().parse::<u32>().unwrap_or(0);
+                        config.write().questions.get_mut(idx).unwrap().id = v;
                     }
                 }
-                tbody {
-                    for q in questions.read().iter() {
-                        tr {
-                            td { "{q.id}" }
-                            td { "{q.name}" }
-                            td { "{q.full_score}" }
-                            td { "{q.weight}" }
-                            td { "{q.comment}" }
+            }
+            td {
+                input {
+                    class: "input input-bordered input-sm w-full",
+                    value: "{q.name}",
+                    oninput: move |ev| {
+                        let v = ev.value();
+                        config.write().questions.get_mut(idx).unwrap().name = v;
+                    }
+                }
+            }
+            td {
+                input {
+                    class: "input input-bordered input-sm w-28",
+                    r#type: "number",
+                    value: "{q.full_score}",
+                    oninput: move |ev| {
+                        let v = ev.value().parse::<u32>().unwrap_or(0);
+                        config.write().questions.get_mut(idx).unwrap().full_score = v;
+                    }
+                }
+            }
+            td {
+                input {
+                    class: "input input-bordered input-sm w-28",
+                    r#type: "number",
+                    step: "0.01",
+                    value: "{q.weight}",
+                    oninput: move |ev| {
+                        let v = ev.value().parse::<f32>().unwrap_or(0.0);
+                        config.write().questions.get_mut(idx).unwrap().weight = v;
+                    }
+                }
+            }
+            td {
+                input {
+                    class: "input input-bordered input-sm w-full",
+                    value: "{q.comment}",
+                    oninput: move |ev| {
+                        let v = ev.value();
+                        config.write().questions.get_mut(idx).unwrap().comment = v;
+                    }
+                }
+            }
+            td { class: "text-right",
+                button {
+                    class: "btn btn-sm btn-ghost",
+                    onclick: move |_| {
+                        let mut config_write = config.write();
+                        if idx < config_write.questions.len() {
+                            config_write.questions.remove(idx);
                         }
-                    }
+                    },
+                    "Del"
                 }
             }
         }
+    }
+}
+
+async fn read_questions_json_text() -> Result<Option<String>, String> {
+    let handle = rfd::AsyncFileDialog::new()
+        .add_filter("JSON", &["json"])
+        .pick_file()
+        .await;
+
+    let Some(handle) = handle else {
+        return Ok(None);
+    };
+
+    let bytes = handle.read().await;
+    let s = String::from_utf8(bytes).map_err(|e| format!("Invalid UTF-8: {e}"))?;
+    if s.trim().is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(s))
     }
 }

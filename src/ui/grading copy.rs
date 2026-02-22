@@ -1,7 +1,9 @@
+// src/ui/grading.rs
 use dioxus::prelude::*;
+
 use crate::ui::scorerows::ScoreRows;
 use crate::ui::search::SearchWindow;
-use crate::models::{Config, Question};
+use crate::models::{Config, Question, Student};
 
 #[component]
 pub fn GradingPage(
@@ -9,24 +11,21 @@ pub fn GradingPage(
     config: Signal<Config>,
 ) -> Element {
 
+    // master data
+    let questions = use_signal(|| config.read().questions.clone());
+    let students  = use_signal(|| config.read().students.clone());
+
     // navigation
-    let cur_student_idx = use_signal(|| 0usize);
-    let cur_question_idx = use_signal(|| 0usize);
+    let mut cur_student_idx = use_signal(|| 0usize);
 
     // search popup
-    let mut search_open = use_signal(|| false);
-    // let search_q = use_signal(|| String::new());
-
-    // message
-    let mut msg = use_signal(|| String::new());
-
-    // Table row
-    let mut table_rows: Signal<Vec<TableRow>> = use_signal(|| Vec::new());
+    let search_open = use_signal(|| false);
+    let search_q = use_signal(|| String::new());
 
     use_effect(move || {
         let js = format!(
             r#"queueMicrotask(() => {{
-                const el = document.getElementById("score-{cur_student_idx}-{cur_question_idx}");
+                const el = document.getElementById("score-{cur_student_idx}-{focus_idx}");
                 if (el) {{
                     el.focus();
                     if (el.select) el.select();
@@ -35,59 +34,57 @@ pub fn GradingPage(
         );
         let _ = document::eval(&js);
     });
+    
 
-    use_effect(move || {
-
-        let mut filled = true;
-        let students = config().students.clone();
-        let questions = config().questions.clone();
-        let cfg = config.read().clone();
-
-        let mut rows: Vec<TableRow> = Vec::with_capacity(students.len());
-
-        for student in &students {
-            let mut score_strings: Vec<String> = Vec::with_capacity(questions.len());
-
-            let mut weighted_sum: f32 = 0.0;
-            let mut weighted_full: f32 = 0.0;
-
-            for q in &questions {
-                let score_opt = cfg.scores.iter().find(|s|
-                    s.student_id == student.id && s.question_id == q.id
-                );
-
-                if let Some(sc) = score_opt {
-                    if let Some(scv) = sc.score {
-                        score_strings.push(scv.to_string());
-                        weighted_sum += scv as f32 * q.weight;
-                    } else {
-                        score_strings.push(String::new());
-                        filled = false;
-                    }
-                } else {
-                    score_strings.push(String::new());
-                }
-                weighted_full += q.full_score as f32 * q.weight;
+    // load scores for current student
+    let load_current_student_scores = {
+        move || {
+            if students().is_empty() || questions().is_empty() || cur_student_idx() >= students().len() {
+                score_inputs.set(vec![String::new(); questions().len()]);
+                return;
             }
-
-            // 100点換算（必要なら）
-            let final_display = if weighted_full > 0.0 && filled {
-                format!("{:.1}", weighted_sum / weighted_full * 100.0)
-            } else {
-                String::new()
-            };
-
-            rows.push(TableRow {
-                student_id: student.id.clone(),
-                student_name: student.name.clone(),
-                scores: score_strings,
-                final_display,
+            spawn(async move {
+                let sid = &cur_student_idx().to_string();
+                match db.get_scores_for_student(&sid).await {
+                    Ok(pairs) => {
+                        let mut v = vec![String::new(); questions().len()];
+                        for (i, (_qid, score)) in pairs.into_iter().enumerate().take(questions().len()) {
+                            v[i] = score.map(|x| x.to_string()).unwrap_or_default();
+                        }
+                        score_inputs.set(v);
+                        msg.set("".to_string());
+                    }
+                    Err(e) => msg.set(format!("load scores error: {e:#}")),
+                }
             });
         }
+    };
 
-        table_rows.set(rows);
-    });
+    {
+        let mut load = load_current_student_scores.clone();
+        let students = students.clone();
+        let questions = questions.clone();
 
+        use_effect(move || {
+            let _ = students.read().len();
+            let _ = questions.read().len();
+            let _ = cur_student_idx();
+            load();
+        });
+    }
+
+    // ---------- derived ----------
+    let ss = students.read();
+    let qs = questions.read();
+
+    let cur_student = ss.get(cur_student_idx()).cloned();
+    let cur_student_label = cur_student
+        .as_ref()
+        .map(|s| format!("{}  {}", s.id, s.name))
+        .unwrap_or_else(|| "(受験者なし)".to_string());
+
+
+    
     // ---------- UI ----------
 
     rsx! {
@@ -105,19 +102,11 @@ pub fn GradingPage(
                         }
                         "j" | "J" => {
                             e.prevent_default();
-                            mv_prev_student(cur_student_idx);
+                            mv_prev(focus_idx);
                         }
                         "l" | "L" => {
                             e.prevent_default();
-                            mv_next_student(cur_student_idx, config().students.len());
-                        }
-                        _ => {}
-                    }
-                } else {
-                    match e.key() {
-                        Key::Escape => {
-                            e.prevent_default();
-                            search_open.set(false);
+                            mv_next(focus_idx, questions().len());
                         }
                         _ => {}
                     }
@@ -127,12 +116,12 @@ pub fn GradingPage(
             // Top bar / Navbar
             div { class: "navbar bg-base-100 rounded-box shadow mb-4",
                 div { class: "navbar-start gap-2",
-                    button { class: "btn btn-sm btn-primary", onclick: move |_| on_back.call(()), "戻る" }
-                    button { class: "btn btn-sm", onclick: move |_| { mv_prev_student(cur_student_idx) }, "← 前" }
-                    button { class: "btn btn-sm", onclick: move |_| { mv_next_student(cur_student_idx, config().students.len()) }, "次 →" }
+                    button { class: "btn btn-sm", onclick: move |_| on_back.call(()), "戻る" }
+                    button { class: "btn btn-sm", onclick: move |_| { mv_prev(focus_idx) }, "← 前" }
+                    button { class: "btn btn-sm btn-primary", onclick: move |_| { mv_next(focus_idx, questions().len()) }, "次 →" }
                 }
                 div { class: "navbar-center",
-                    div { class: "text-lg font-bold", "{cur_student_label(config, cur_student_idx)}" }
+                    div { class: "text-lg font-bold", "{cur_student_label}" }
                 }
                 div { class: "navbar-end",
                     div { class: "text-xs opacity-70 hidden md:block",
@@ -148,11 +137,6 @@ pub fn GradingPage(
             // Main area
             div { class: "grid grid-cols-1 xl:grid-cols-[1fr_18rem_20rem] gap-4",
 
-                ScoreRows {
-                    cur_student_idx,
-                    cur_question_idx,
-                    config,
-                }
 
                 // comment panel card (placeholder)
                 div { class: "card bg-base-100 shadow",
@@ -168,7 +152,7 @@ pub fn GradingPage(
                         div { class: "card-title", "進捗" }
                         div { class: "flex justify-between",
                             span { "採点済み" }
-                            span { class: "font-mono", "completed_students/total_students" }
+                            span { class: "font-mono", "{completed_students}/{total_students}" }
                         }
                     }
                 }
@@ -183,7 +167,8 @@ pub fn GradingPage(
                     }
 
                     {
-                        let qids = config().questions.iter().map(|q| q.id.clone()).collect::<Vec<_>>();
+                        let qids = qs.iter().map(|q| q.id.clone()).collect::<Vec<_>>();
+                        println!("qids: {:?}", qids);
                         rsx! {
                             div { class: "overflow-auto max-h-96 mt-3",
                                 table { class: "table table-zebra table-sm",
@@ -219,15 +204,7 @@ pub fn GradingPage(
             // search modal
             {
                 search_open().then(|| 
-                    rsx!{
-                        SearchWindow { 
-                            is_open: search_open, 
-                            msg, 
-                            config, 
-                            cur_student_idx, 
-                            focus_idx: cur_question_idx
-                        }
-                    }
+                    rsx!{ SearchWindow { search_open, msg, students, cur_student_idx, focus_idx } }
                 )
             }
         }
@@ -245,8 +222,7 @@ struct TableRow {
 
 
 // final = Σ(score/full*weight) / Σ(weight) * 100
-/*
-fn calc_final(questions: &[Question], scores: &[Option<u32>]) -> Option<f32> {
+fn calc_final(questions: &[QuestionRow], scores: &[Option<u32>]) -> Option<f32> {
     if questions.is_empty() {
         return None;
     }
@@ -266,9 +242,9 @@ fn calc_final(questions: &[Question], scores: &[Option<u32>]) -> Option<f32> {
 
     if den == 0.0 { None } else { Some(num / den * 100.0) }
 }
-*/
 
-fn is_student_done(questions: &[Question], inputs: &[String]) -> bool {
+
+fn is_student_done(questions: &[QuestionRow], inputs: &[String]) -> bool {
     if questions.is_empty() || inputs.len() != questions.len() {
         return false;
     }
@@ -288,32 +264,21 @@ fn is_student_done(questions: &[Question], inputs: &[String]) -> bool {
     true
 }
 
-fn mv_prev_student(
-    mut cur_student_idx: Signal<usize>
+fn mv_next(
+    mut focus_idx: Signal<usize>, 
+    qs_len: usize
 ) {
-    let current_idx = cur_student_idx();
-    let idx = current_idx.saturating_sub(1);
-    cur_student_idx.set(idx);
+    let current = *focus_idx.read();
+    let max_idx = qs_len.saturating_sub(1);
+    let idx = std::cmp::min(current + 1, max_idx);
+    focus_idx.set(idx);
 }
 
-fn mv_next_student(
-    mut cur_student_idx: Signal<usize>, 
-    student_count: usize
+fn mv_prev(
+    mut focus_idx: Signal<usize>
 ) {
-    let current_idx = cur_student_idx();
-    let max_idx = student_count.saturating_sub(1);
-    let idx = std::cmp::min(current_idx + 1, max_idx);
-    cur_student_idx.set(idx);
+    let current = *focus_idx.read();
+    let idx = current.saturating_sub(1);
+    focus_idx.set(idx);
 }
 
-
-
-fn cur_student_label(
-    config: Signal<Config>,
-    cur_student_idx: Signal<usize>,
-) -> String {
-    config().students
-        .get(cur_student_idx())
-        .map(|s| format!("{} ({})", s.name, s.id))
-        .unwrap_or_else(|| "No student".to_string())
-}

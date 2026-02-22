@@ -2,8 +2,6 @@ use anyhow::{Context, Result};
 use csv::ReaderBuilder;
 use std::path::Path;
 
-use crate::db::{QuestionRow, StudentRow};
-
 pub fn read_questions_csv(path: &Path) -> Result<Vec<QuestionRow>> {
     let mut rdr = ReaderBuilder::new()
         .has_headers(true)
@@ -14,15 +12,15 @@ pub fn read_questions_csv(path: &Path) -> Result<Vec<QuestionRow>> {
     let mut out = vec![];
     for (i, rec) in rdr.records().enumerate() {
         let rec = rec.with_context(|| format!("csv read error at line {}", i + 2))?;
-        let id = rec.get(0).context("missing id")?.to_string();
+        let id = rec.get(0).context("missing id")?;
         let name = rec.get(1).context("missing name")?.to_string();
-        let full_score: i64 = rec.get(2).context("missing full_score")?.parse()
+        let full_score: u32 = rec.get(2).context("missing full_score")?.parse()
             .with_context(|| format!("invalid full_score at line {}", i + 2))?;
-        let weight: f64 = rec.get(3).context("missing weight")?.parse()
+        let weight: f32 = rec.get(3).context("missing weight")?.parse()
             .with_context(|| format!("invalid weight at line {}", i + 2))?;
         let comment: String = rec.get(4).context("")?.parse()
             .with_context(|| format!("invalid comment at line {}", i + 2))?;
-        out.push(QuestionRow { id, name, full_score, weight, comment });
+        out.push(QuestionRow { id: id.parse().unwrap(), name, full_score, weight, comment });
     }
     Ok(out)
 }

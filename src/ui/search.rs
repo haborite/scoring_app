@@ -1,38 +1,65 @@
 use dioxus::prelude::*;
-use crate::db::StudentRow;
-use crate::db::Db;
+use crate::models::{Config, Student};
 
 #[component]
 pub fn SearchWindow(
-    search_open: Signal<bool>,
+    is_open: Signal<bool>,
     msg: Signal<String>,
-    students: Signal<Vec<StudentRow>>,
+    config: Signal<Config>,
     cur_student_idx: Signal<usize>,
     focus_idx: Signal<usize>,
 ) -> Element {
+    let mut search_q = use_signal(String::new);
+    let mut search_results = use_signal(|| Vec::<Student>::new());
 
-    // DB access context
-    let db = use_context::<Db>();
+    // 追加: 検索結果内の選択位置
+    let mut selected_idx = use_signal(|| 0usize);
 
-    let mut search_q = use_signal(|| String::new());
-    let search_results = use_signal(Vec::<StudentRow>::new);
-
-    // incremental search
-    let run_search = {
+    // incremental search (in-memory)
+    let mut run_search = {
+        let mut selected_idx = selected_idx;
         move |q: String| {
-            let db_cloned = db.clone();
-            let mut res_cloned = search_results.clone();
-            let mut msg_cloned = msg.clone();
-            spawn(async move {
-                if q.trim().is_empty() {
-                    res_cloned.set(vec![]);
-                    return;
-                }
-                match db_cloned.search_students(&q, 30).await {
-                    Ok(r) => res_cloned.set(r),
-                    Err(e) => msg_cloned.set(format!("search error: {e:#}")),
-                }
-            });
+            let q_trim = q.trim().to_string();
+            if q_trim.is_empty() {
+                search_results.set(vec![]);
+                selected_idx.set(0);
+                return;
+            }
+
+            let q_upper = q_trim.to_uppercase();
+
+            let all = config().students.clone();
+            let mut hits: Vec<Student> = all
+                .into_iter()
+                .filter(|s| {
+                    let id_hit = s.id.to_uppercase().contains(&q_upper);
+                    let name_hit = s.name.contains(&q_trim);
+                    id_hit || name_hit
+                })
+                .take(30)
+                .collect();
+
+            hits.sort_by(|a, b| a.id.cmp(&b.id));
+
+            search_results.set(hits);
+            selected_idx.set(0); // 新しい検索ごとに先頭を選択
+        }
+    };
+
+    // 選択確定（クリック・Enter 共通）
+    let mut select_student = {
+        let mut is_open = is_open;
+        let mut msg = msg;
+        let mut cur_student_idx = cur_student_idx;
+        let mut focus_idx = focus_idx;
+        move |sid: String| {
+            if let Some(pos) = config().students.iter().position(|x| x.id == sid) {
+                cur_student_idx.set(pos);
+            } else {
+                msg.set("選択した学生が見つかりません（一覧が更新された可能性）".to_string());
+            }
+            is_open.set(false);
+            focus_idx.set(0);
         }
     };
 
@@ -42,38 +69,79 @@ pub fn SearchWindow(
                 div { class: "flex items-center gap-3",
                     h3 { class: "font-bold text-lg", "検索（学籍番号/氏名）" }
                     div { class: "ml-auto",
-                        button { class: "btn btn-sm", onclick: move |_| search_open.set(false), "閉じる" }
+                        button {
+                            class: "btn btn-sm",
+                            onclick: move |_| is_open.set(false),
+                            "閉じる"
+                        }
                     }
                 }
 
                 input {
                     class: "input input-bordered w-full mt-3",
                     placeholder: "例: A001 / 山田",
-                    value: "{search_q}",
+                    value: "{search_q()}",
                     autofocus: true,
+
                     oninput: move |e| {
                         let v = e.value();
                         search_q.set(v.clone());
+                        msg.set(String::new());
                         run_search(v);
+                    },
+
+                    // 追加: キー操作
+                    onkeydown: move |e| {
+                        match e.key() {
+                            Key::Escape => {
+                                e.prevent_default();
+                                is_open.set(false);
+                            }
+                            Key::ArrowDown => {
+                                e.prevent_default();
+                                let n = search_results.read().len();
+                                if n > 0 {
+                                    selected_idx.set((selected_idx() + 1).min(n - 1));
+                                }
+                            }
+                            Key::ArrowUp => {
+                                e.prevent_default();
+                                selected_idx.set(selected_idx().saturating_sub(1));
+                            }
+                            Key::Enter => {
+                                e.prevent_default();
+                                let n = search_results.read().len();
+                                if n > 0 {
+                                    let i = selected_idx().min(n - 1);
+                                    if let Some(s) = search_results.read().get(i) {
+                                        select_student(s.id.clone());
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                 }
 
                 div { class: "mt-3 max-h-72 overflow-auto border border-base-300 rounded",
-                    for s in search_results().iter() {
-                        div {
-                            class: "px-3 py-2 hover:bg-base-200 cursor-pointer",
-                            onclick: {
-                                let sid = s.id.clone();
-                                move |_| {
-                                    if let Some(pos) = students().iter().position(|x| x.id == sid) {
-                                        cur_student_idx.set(pos);
-                                    }
-                                    search_open.set(false);
-                                    focus_idx.set(0);
+                    for (i, s) in search_results().iter().enumerate() {
+                        {
+                            let sid = s.id.clone();
+                            let cls = if i == selected_idx() {
+                                "px-3 py-2 bg-base-200 cursor-pointer"
+                            } else {
+                                "px-3 py-2 hover:bg-base-200 cursor-pointer"
+                            };
+                            rsx! {
+                                div {
+                                    class: "{cls}",
+                                    onclick: move |_| {
+                                        select_student(sid.clone());
+                                    },
+                                    span { class: "font-mono", "{s.id}" }
+                                    span { class: "ml-3", "{s.name}" }
                                 }
-                            },
-                            span { class: "font-mono", "{s.id}" }
-                            span { class: "ml-3", "{s.name}" }
+                            }
                         }
                     }
 
@@ -81,12 +149,11 @@ pub fn SearchWindow(
                         div { class: "px-3 py-2 opacity-60", "該当なし" }
                     })}
                 }
-                
             }
 
             // click outside to close
             div { class: "modal-backdrop",
-                onclick: move |_| search_open.set(false),
+                onclick: move |_| is_open.set(false),
             }
         }
     }
