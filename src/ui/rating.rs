@@ -155,7 +155,7 @@ fn HistogramCard(
                 div { class: "flex items-end gap-1 h-40",
 
                     {
-                        bins.iter().enumerate().map(|(i, &count)| {
+                        bins.iter().enumerate().map(|(_i, &count)| {
                             let height = (count as f32 / max as f32) * 100.0;
                             rsx! {
                                 div {

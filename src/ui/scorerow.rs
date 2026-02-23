@@ -26,9 +26,8 @@ pub fn ScoreRow(
     let full = question.full_score;
 
     rsx! {
-        div { class: "grid grid-cols-[1fr_auto_auto] md:grid-cols-[12rem_1fr_auto_auto] gap-2 items-center",
+        div { class: "grid grid-cols-[1fr_auto_auto] md:grid-cols-[8rem_6rem_auto_auto] gap-2 items-center",
             div { class: "font-semibold truncate", "{q_name}" }
-
             input {
                 id: "score-{qidx}",
                 r#type: "number",
@@ -43,7 +42,6 @@ pub fn ScoreRow(
                 autofocus: is_focused,
 
                 oninput: move |e| {
-                    println!("on input: question_id={question_id}, value={}", e.value());
                     let mut s = e.value();
                     s.retain(|c| c.is_ascii_digit());
                     let mut binding = config.write();
@@ -80,12 +78,12 @@ pub fn ScoreRow(
                 },
 
                 onkeydown: move |e| {
-                    match e.key() {
-                        Key::Enter | Key::ArrowDown => {
+                    match e.code() {
+                        Code::Enter | Code::NumpadEnter | Code::ArrowDown | Code::NumpadAdd => {
                             e.prevent_default();
                             move_to_next.call(());
                         },
-                        Key::ArrowUp => {
+                        Code::ArrowUp | Code::NumpadSubtract => {
                             e.prevent_default();
                             move_to_prev.call(());
                         },
@@ -94,9 +92,8 @@ pub fn ScoreRow(
                 },
                 onfocus: move |_e| { cur_question_id.set(Some(question_id)); }
             }
-            p { class: "validator-hint", "Must be between be 0 to {full}" }
-
             div { class: "text-sm opacity-60", " / {full}" }
+            p { class: "validator-hint", "Must be 0 to {full}" }
         }
     }
 }

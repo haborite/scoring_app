@@ -2,6 +2,8 @@ use dioxus::prelude::*;
 use crate::models::Config;
 use crate::ui::ScoreRow;
 
+const TWO_COL_THRESHOLD: usize = 12;
+
 #[component]
 pub fn ScoreRows(
     cur_student_idx: Signal<usize>,
@@ -10,40 +12,38 @@ pub fn ScoreRows(
     focus_idx: Signal<usize>,
     search_open: Signal<bool>,
 ) -> Element {
+    let questions = config.read().questions.clone();
+    let qlen = questions.len();
+    let two_col = qlen >= TWO_COL_THRESHOLD;
+    let mid = (qlen + 1) / 2;
+
     rsx! {
         div { class: "card bg-base-100 shadow",
             div { class: "card-body",
                 // global hotkeys: F opens search
                 onkeydown: move |e| {
-                    if let Key::Character(chr) = e.key() {
-                        match chr.as_str() {
-                            "f" | "F" => {
-                                e.prevent_default();
-                                search_open.set(true);
-                            }
-                            "j" | "J" => {
-                                e.prevent_default();
-                                mv_prev_student(cur_student_idx);
-                            }
-                            "l" | "L" => {
-                                e.prevent_default();
-                                mv_next_student(cur_student_idx, config().students.len());
-                            }
-                            _ => {}
+                    match e.code() {
+                        Code::KeyF | Code::NumpadDecimal => {
+                            e.prevent_default();
+                            search_open.set(true);
                         }
-                    } else {
-                        match e.key() {
-                            Key::Escape => {
-                                e.prevent_default();
-                                search_open.set(false);
-                            }
-                            _ => {}
+                        Code::KeyJ | Code::NumpadDivide => {
+                            e.prevent_default();
+                            mv_prev_student(cur_student_idx);
                         }
+                        Code::KeyL | Code::NumpadMultiply => {
+                            e.prevent_default();
+                            mv_next_student(cur_student_idx, config().students.len());
+                        }
+                        Code::Escape => {
+                            e.prevent_default();
+                            search_open.set(false);
+                        }
+                        _ => {}
                     }
                 },
 
                 div { class: "navbar",
-
                     button {
                         class: "btn max-w-xs",
                         onclick: move |_| { mv_prev_student(cur_student_idx) },
@@ -68,24 +68,51 @@ pub fn ScoreRows(
                 } else if config.read().questions.is_empty() {
                     div { class: "alert", "問題が未登録です" }
                 } else {
-                    div { class: "space-y-1",
-                        for (qidx, question) in config.read().questions.iter().enumerate() {
-                            ScoreRow {
-                                key: "row-{qidx}",
-                                question_id: question.id,
-                                cur_question_id,
-                                cur_student_idx,
-                                qidx,
-                                config,
-                                is_focused: focus_idx() == qidx,
-                                move_to_next: move |_| {
-                                    let idx = std::cmp::min(qidx + 1, config.read().questions.len());
-                                    focus_idx.set(idx);
-                                },
-                                move_to_prev: move |_| {
-                                    // let idx = if qidx <= 0 {0} else {qidx - 1};
-                                    let idx = qidx.saturating_sub(1);
-                                    focus_idx.set(idx);
+                    div { class: if two_col { "grid grid-cols-2 gap-x-4 gap-y-1" } else { "space-y-1" },
+                        if two_col {
+                            for i in 0..qlen {
+                                {
+                                    let row = i / 2;
+                                    let col = i % 2;
+                                    let original_idx = if col == 0 { row } else { row + mid };
+                                    let question = &questions[original_idx];
+                                        rsx! {
+                                        ScoreRow {
+                                            key: "row-{original_idx}",
+                                            question_id: question.id,
+                                            cur_question_id,
+                                            cur_student_idx,
+                                            qidx: original_idx,
+                                            config,
+                                            is_focused: focus_idx() == original_idx,
+                                            move_to_next: move |_| {
+                                                let last = qlen.saturating_sub(1);
+                                                focus_idx.set(std::cmp::min(original_idx + 1, last));
+                                            },
+                                            move_to_prev: move |_| {
+                                                focus_idx.set(original_idx.saturating_sub(1));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            for (qidx, question) in questions.iter().enumerate() {
+                                ScoreRow {
+                                    key: "row-{qidx}",
+                                    question_id: question.id,
+                                    cur_question_id,
+                                    cur_student_idx,
+                                    qidx,
+                                    config,
+                                    is_focused: focus_idx() == qidx,
+                                    move_to_next: move |_| {
+                                        let last = qlen.saturating_sub(1);
+                                        focus_idx.set(std::cmp::min(qidx + 1, last));
+                                    },
+                                    move_to_prev: move |_| {
+                                        focus_idx.set(qidx.saturating_sub(1));
+                                    }
                                 }
                             }
                         }
@@ -106,22 +133,15 @@ fn cur_student_label(
         .unwrap_or_else(|| "No student".to_string())
 }
 
-fn mv_prev_student(
-    mut cur_student_idx: Signal<usize>
-) {
+fn mv_prev_student(mut cur_student_idx: Signal<usize>) {
     let current_idx = cur_student_idx();
     let idx = current_idx.saturating_sub(1);
     cur_student_idx.set(idx);
 }
 
-fn mv_next_student(
-    mut cur_student_idx: Signal<usize>, 
-    student_count: usize
-) {
+fn mv_next_student(mut cur_student_idx: Signal<usize>, student_count: usize) {
     let current_idx = cur_student_idx();
     let max_idx = student_count.saturating_sub(1);
     let idx = std::cmp::min(current_idx + 1, max_idx);
     cur_student_idx.set(idx);
 }
-
-
