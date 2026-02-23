@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::ui::{ScoreRows, SearchWindow, MatrixTable};
-use crate::models::{Config, Question, TableRow};
+use crate::models::Config;
 
 #[component]
 pub fn GradingPage(
@@ -16,7 +16,7 @@ pub fn GradingPage(
     let mut search_open = use_signal(|| false);    
 
     // message
-    let mut msg = use_signal(|| String::new());
+    let msg = use_signal(|| String::new());
 
     use_effect(move || {
         let el_id = if search_open() { "search" } else { "score-0" };
@@ -88,7 +88,7 @@ pub fn GradingPage(
             })}
 
             // Main area
-            div { class: "grid grid-cols-1 xl:grid-cols-[1fr_18rem_20rem] gap-4",
+            div { class: "grid grid-cols-1 xl:grid-cols-[50rem_1fr] gap-4",
 
                 ScoreRows { cur_student_idx, config }
 
@@ -122,53 +122,6 @@ pub fn GradingPage(
     }
 }
 
-
-
-
-// final = Σ(score/full*weight) / Σ(weight) * 100
-/*
-fn calc_final(questions: &[Question], scores: &[Option<u32>]) -> Option<f32> {
-    if questions.is_empty() {
-        return None;
-    }
-    let mut num = 0.0f32;
-    let mut den = 0.0f32;
-
-    for (q, s) in questions.iter().zip(scores.iter()) {
-        if q.weight <= 0.0 {
-            continue;
-        }
-        den += q.weight;
-
-        let sc = s.unwrap_or(0) as f32;
-        let full = q.full_score.max(1) as f32;
-        num += (sc / full) * q.weight;
-    }
-
-    if den == 0.0 { None } else { Some(num / den * 100.0) }
-}
-*/
-
-fn is_student_done(questions: &[Question], inputs: &[String]) -> bool {
-    if questions.is_empty() || inputs.len() != questions.len() {
-        return false;
-    }
-    for (q, s) in questions.iter().zip(inputs.iter()) {
-        let t = s.trim();
-        if t.is_empty() {
-            return false;
-        }
-        if let Ok(n) = t.parse::<u32>() {
-            if n < 0 || n > q.full_score {
-                return false;
-            }
-        } else {
-            return false;
-        }
-    }
-    true
-}
-
 fn mv_prev_student(
     mut cur_student_idx: Signal<usize>
 ) {
@@ -186,8 +139,6 @@ fn mv_next_student(
     let idx = std::cmp::min(current_idx + 1, max_idx);
     cur_student_idx.set(idx);
 }
-
-
 
 fn cur_student_label(
     config: Signal<Config>,

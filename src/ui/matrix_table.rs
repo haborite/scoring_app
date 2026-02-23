@@ -16,9 +16,8 @@ pub fn MatrixTable(
         let cfg = config.read();
         let students = &cfg.students;
         let questions = &cfg.questions;
-        
-        let score_map: HashMap<(&str, u32), Option<u32>> = cfg
-            .scores
+
+        let score_map: HashMap<(&str, u32), Option<u32>> = cfg.scores
             .iter()
             .map(|s| ((s.student_id.as_str(), s.question_id), s.score))
             .collect();
@@ -42,7 +41,6 @@ pub fn MatrixTable(
                 {
                     Some(scv) => {
                         score_strings.push(scv.to_string());
-
                         if q.full_score > 0 {
                             let rate = scv as f32 / q.full_score as f32;
                             weighted_rate_sum += rate * q.weight;
