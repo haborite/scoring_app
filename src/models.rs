@@ -74,3 +74,10 @@ pub struct TableRow {
     pub scores: Vec<String>,
     pub final_display: String,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Page {
+    MasterQuestions,
+    MasterStudents,
+    Grading,
+}

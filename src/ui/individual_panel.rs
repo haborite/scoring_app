@@ -26,7 +26,7 @@ pub fn IndividualPanel(
     });
 
     rsx! {
-        div { class: "grid grid-cols-1 xl:grid-cols-[1fr_60rem] gap-4",
+        div { class: "grid grid-cols-1 xl:grid-cols-[1fr_60rem] gap-2",
             CommentPanel { config, cur_question_id }
             ScoreRows { cur_student_idx, cur_question_id, config, focus_idx, search_open }
         }

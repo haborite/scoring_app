@@ -1,28 +1,22 @@
 use dioxus::prelude::*;
-
+use crate::Page;
 use crate::models::{Config, Student};
+use crate::ui::SaveBar;
 
 #[component]
 pub fn MasterStudentsPage(
-    on_back: EventHandler<()>,
+    on_nav: EventHandler<Page>,
     config: Signal<Config>,
 ) -> Element {
 
     rsx! {
-        div { class: "p-4 space-y-4",
+        div { class: "p-2 space-y-2",
 
-            div { class: "flex items-center gap-2",
-                button {
-                    class: "btn btn-sm",
-                    onclick: move |_| on_back.call(()),
-                    "Back"
-                }
-                h2 { class: "text-lg font-bold", "Import / Edit Students" }
-            }
+            SaveBar { config, on_nav }
 
             // import panel
             div { class: "card bg-base-100 shadow",
-                div { class: "card-body p-4 space-y-3",
+                div { class: "card-body p-2 space-y-3",
 
                     div { class: "flex flex-wrap items-center gap-2",
                         input {

@@ -76,7 +76,7 @@ pub fn MatrixTable(
     });
 
     rsx! {
-        div { class: "card bg-base-100 shadow mt-4",
+        div { class: "card bg-base-100 shadow mt-2",
             div { class: "card-body",
                 div { class: "flex items-center gap-3",
                     div { class: "card-title", "Completed: " }

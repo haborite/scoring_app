@@ -1,5 +1,4 @@
 pub mod grading;
-pub mod home;
 pub mod master_questions;
 pub mod master_students;
 pub mod scorerow;
@@ -11,7 +10,6 @@ pub mod comment_panel;
 pub mod individual_panel;
 
 pub use grading::*;
-pub use home::*;
 pub use master_questions::*;
 pub use master_students::*;
 pub use scorerow::*;

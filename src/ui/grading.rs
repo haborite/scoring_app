@@ -1,10 +1,11 @@
 use dioxus::prelude::*;
-use crate::ui::{SearchWindow, MatrixTable, IndividualPanel};
+use crate::Page;
+use crate::ui::{SearchWindow, MatrixTable, IndividualPanel, SaveBar};
 use crate::models::Config;
 
 #[component]
 pub fn GradingPage(
-    on_back: EventHandler<()>,
+    on_nav: EventHandler<Page>,
     config: Signal<Config>,
 ) -> Element {
 
@@ -31,25 +32,13 @@ pub fn GradingPage(
 
     rsx! {
         div {
-            class: "min-h-screen p-4 bg-base-200 text-base-content",
+            class: "min-h-screen p-2 bg-base-200 text-base-content",
             tabindex: "0",
             // Top bar / Navbar
-            div { class: "navbar bg-base-100 rounded-box shadow mb-4",
-                div { class: "navbar-start gap-2",
-                    button { class: "btn btn-sm btn-primary", onclick: move |_| on_back.call(()), "戻る" }
-                }
-                div { class: "navbar-center",
-                    div { class: "text-lg font-bold", "cur_student_label(config, cur_student_idx)" }
-                }
-                div { class: "navbar-end",
-                    div { class: "text-xs opacity-70 hidden md:block",
-                        "F:検索 / J,K:受験者移動 / Enter:次問題"
-                    }
-                }
-            }
+            SaveBar { config, on_nav }
 
             {(!msg.read().is_empty()).then(|| rsx! {
-                div { class: "alert alert-error mb-4", "{msg}" }
+                div { class: "alert alert-error mb-2", "{msg}" }
             })}
 
             // Individual area
