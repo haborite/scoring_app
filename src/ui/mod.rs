@@ -8,6 +8,7 @@ pub mod search;
 pub mod matrix_table;
 pub mod comment_panel;
 pub mod individual_panel;
+pub mod rating;
 
 pub use grading::*;
 pub use master_questions::*;
@@ -19,3 +20,4 @@ pub use search::*;
 pub use matrix_table::*;
 pub use comment_panel::*;
 pub use individual_panel::*;
+pub use rating::*;

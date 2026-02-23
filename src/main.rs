@@ -3,7 +3,7 @@ use dioxus::prelude::*;
 mod ui;
 mod models;
 
-use ui::{MasterQuestionsPage, MasterStudentsPage, GradingPage};
+use ui::{MasterQuestionsPage, MasterStudentsPage, GradingPage, RatingPage};
 use models::{Config, Page};
 
 fn main() {
@@ -39,6 +39,12 @@ fn App() -> Element {
                 GradingPage { 
                     on_nav: move |p| page.set(p),
                     config,                    
+                }
+            },
+            Page::Rating => rsx! {
+                RatingPage {
+                    on_nav: move |p| page.set(p),
+                    config,
                 }
             },
         }

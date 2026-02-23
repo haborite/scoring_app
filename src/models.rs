@@ -6,9 +6,11 @@ use dioxus::prelude::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Store)]
 pub struct Config {
+    pub save_path: Option<String>,
     pub questions: Vec<Question>,
     pub students: Vec<Student>,
-    pub scores: Vec<Score>
+    pub scores: Vec<Score>,
+    pub ratings: Vec<Rating>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Store)]
@@ -33,15 +35,41 @@ pub struct Score {
     pub score: Option<u32>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Store)]
+pub struct Rating {
+    pub label: String,
+    pub min_score: u32,
+}
+
+// ----------- for UI display -----------
+
+#[derive(Clone)]
+pub struct TableRow {
+    pub student_id: String,
+    pub student_name: String,
+    pub scores: Vec<String>,
+    pub final_display: String,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Page {
+    MasterQuestions,
+    MasterStudents,
+    Grading,
+    Rating,
+}
+
 // ----------- implementation --------------
 
 impl Config {
 
     pub fn new() -> Config {
         Config {
+            save_path: None,
             questions: Vec::new(),
             students: Vec::new(),
             scores: Vec::new(),
+            ratings: Vec::new(),
         }
     }
 
@@ -65,19 +93,4 @@ impl Config {
         Ok(())
     }
     
-}
-
-#[derive(Clone)]
-pub struct TableRow {
-    pub student_id: String,
-    pub student_name: String,
-    pub scores: Vec<String>,
-    pub final_display: String,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Page {
-    MasterQuestions,
-    MasterStudents,
-    Grading,
 }
