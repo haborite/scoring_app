@@ -7,6 +7,8 @@ pub mod scorerows;
 pub mod savebar;
 pub mod search;
 pub mod matrix_table;
+pub mod comment_panel;
+pub mod individual_panel;
 
 pub use grading::*;
 pub use home::*;
@@ -17,3 +19,5 @@ pub use scorerows::*;
 pub use savebar::*;
 pub use search::*;
 pub use matrix_table::*;
+pub use comment_panel::*;
+pub use individual_panel::*;

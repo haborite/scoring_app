@@ -5,28 +5,14 @@ use crate::ui::ScoreRow;
 #[component]
 pub fn ScoreRows(
     cur_student_idx: Signal<usize>,
+    cur_question_id: Signal<Option<u32>>,
     config: Signal<Config>,
+    focus_idx: Signal<usize>,
 ) -> Element {
-
-    // Navigation
-    let mut focus_idx = use_signal(|| 0usize);
-    use_effect(move || {
-        let js = format!(
-            r#"queueMicrotask(() => {{
-                const el = document.getElementById("score-{focus_idx}");
-                if (el) {{
-                    el.focus();
-                    if (el.select) el.select();
-                }}
-            }});"#
-        );
-        let _ = document::eval(&js);
-    });
-
     rsx! {
         div { class: "card bg-base-100 shadow",
             div { class: "card-body",
-                div { class: "card-title", "採点入力" }
+                div { class: "card-title", "{cur_student_label(config, cur_student_idx)}" }
 
                 if config.read().students.is_empty() {
                     div { class: "alert", "受験者が未登録です" }
@@ -38,6 +24,7 @@ pub fn ScoreRows(
                             ScoreRow {
                                 key: "row-{qidx}",
                                 question_id: question.id,
+                                cur_question_id,
                                 cur_student_idx,
                                 qidx,
                                 config,
@@ -59,3 +46,14 @@ pub fn ScoreRows(
         }
     }
 }
+
+fn cur_student_label(
+    config: Signal<Config>,
+    cur_student_idx: Signal<usize>,
+) -> String {
+    config().students
+        .get(cur_student_idx())
+        .map(|s| format!("{} {}", s.id, s.name))
+        .unwrap_or_else(|| "No student".to_string())
+}
+

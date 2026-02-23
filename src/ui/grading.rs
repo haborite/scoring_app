@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::ui::{ScoreRows, SearchWindow, MatrixTable};
+use crate::ui::{SearchWindow, MatrixTable, IndividualPanel};
 use crate::models::Config;
 
 #[component]
@@ -10,9 +10,6 @@ pub fn GradingPage(
 
     // navigation
     let cur_student_idx = use_signal(|| 0usize);
-
-    // search popup
-    // let search_q = use_signal(|| String::new());
     let mut search_open = use_signal(|| false);    
 
     // message
@@ -74,7 +71,7 @@ pub fn GradingPage(
                     button { class: "btn btn-sm", onclick: move |_| { mv_next_student(cur_student_idx, config().students.len()) }, "次 →" }
                 }
                 div { class: "navbar-center",
-                    div { class: "text-lg font-bold", "{cur_student_label(config, cur_student_idx)}" }
+                    div { class: "text-lg font-bold", "cur_student_label(config, cur_student_idx)" }
                 }
                 div { class: "navbar-end",
                     div { class: "text-xs opacity-70 hidden md:block",
@@ -87,19 +84,8 @@ pub fn GradingPage(
                 div { class: "alert alert-error mb-4", "{msg}" }
             })}
 
-            // Main area
-            div { class: "grid grid-cols-1 xl:grid-cols-[50rem_1fr] gap-4",
-
-                ScoreRows { cur_student_idx, config }
-
-                // comment panel card (placeholder)
-                div { class: "card bg-base-100 shadow",
-                    div { class: "card-body",
-                        div { class: "card-title", "コメント" }
-                        div { class: "opacity-60", "（未実装）" }
-                    }
-                }
-            }
+            // Individual area
+            IndividualPanel { cur_student_idx, config }
 
             // table panel card
             MatrixTable { config }
@@ -113,7 +99,6 @@ pub fn GradingPage(
                             msg, 
                             config, 
                             cur_student_idx, 
-                            // focus_idx: cur_question_idx
                         }
                     }
                 )
@@ -140,12 +125,3 @@ fn mv_next_student(
     cur_student_idx.set(idx);
 }
 
-fn cur_student_label(
-    config: Signal<Config>,
-    cur_student_idx: Signal<usize>,
-) -> String {
-    config().students
-        .get(cur_student_idx())
-        .map(|s| format!("{} {}", s.id, s.name))
-        .unwrap_or_else(|| "No student".to_string())
-}

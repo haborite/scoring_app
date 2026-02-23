@@ -11,7 +11,7 @@ pub struct Config {
     pub scores: Vec<Score>
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Store)]
 pub struct Question {
     pub id: u32,
     pub name: String,
@@ -26,7 +26,7 @@ pub struct Student {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Store)]
 pub struct Score {
     pub student_id: String,
     pub question_id: u32,

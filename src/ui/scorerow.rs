@@ -4,6 +4,7 @@ use crate::models::{Config, Question, Score};
 #[component]
 pub fn ScoreRow(
     question_id: u32,
+    cur_question_id: Signal<Option<u32>>,
     cur_student_idx: ReadSignal<usize>,
     qidx: usize,
     config: Signal<Config>,
@@ -91,6 +92,7 @@ pub fn ScoreRow(
                         _ => {}
                     }
                 },
+                onfocus: move |_e| { cur_question_id.set(Some(question_id)); }
             }
             p { class: "validator-hint", "Must be between be 0 to {full}" }
 
