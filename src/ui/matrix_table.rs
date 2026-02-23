@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use crate::models::{Config, TableRow};
+use std::collections::HashMap;
 
 #[component]
 pub fn MatrixTable(
@@ -8,44 +9,57 @@ pub fn MatrixTable(
 
     // Table row
     let mut table_rows: Signal<Vec<TableRow>> = use_signal(|| Vec::new());
+    let mut completed = use_signal(||0);
+    let mut total = use_signal(||0);
 
     use_effect(move || {
+        let cfg = config.read();
+        let students = &cfg.students;
+        let questions = &cfg.questions;
+        
+        let score_map: HashMap<(&str, u32), Option<u32>> = cfg
+            .scores
+            .iter()
+            .map(|s| ((s.student_id.as_str(), s.question_id), s.score))
+            .collect();
 
-        let students = config().students.clone();
-        let questions = config().questions.clone();
-        let cfg = config.read().clone();
+        let total_weight: f32 = questions.iter().map(|q| q.weight).sum();
 
+        let mut completed_student_count = 0usize;
         let mut rows: Vec<TableRow> = Vec::with_capacity(students.len());
 
-        for student in &students {
+        for student in students.iter() {
             let mut filled = true;
-            let mut score_strings: Vec<String> = Vec::with_capacity(questions.len());
+            let mut score_strings = Vec::with_capacity(questions.len());
 
-            let mut weighted_sum: f32 = 0.0;
-            let mut weighted_full: f32 = 0.0;
+            let mut weighted_rate_sum: f32 = 0.0;
 
-            for q in &questions {
-                let score_opt = cfg.scores.iter().find(|s|
-                    s.student_id == student.id && s.question_id == q.id
-                );
-
-                if let Some(sc) = score_opt {
-                    if let Some(scv) = sc.score {
+            for q in questions.iter() {
+                match score_map
+                    .get(&(student.id.as_str(), q.id))
+                    .copied()
+                    .flatten()
+                {
+                    Some(scv) => {
                         score_strings.push(scv.to_string());
-                        weighted_sum += scv as f32 * q.weight;
-                    } else {
+
+                        if q.full_score > 0 {
+                            let rate = scv as f32 / q.full_score as f32;
+                            weighted_rate_sum += rate * q.weight;
+                        } else {
+                            filled = false;
+                        }
+                    }
+                    None => {
                         score_strings.push(String::new());
                         filled = false;
                     }
-                } else {
-                    score_strings.push(String::new());
-                    filled = false;
                 }
-                weighted_full += q.full_score as f32 * q.weight;
             }
 
-            let final_display = if weighted_full > 0.0 && filled {
-                format!("{:.0}", weighted_sum / weighted_full * 100.0)
+            let final_display = if filled && total_weight > 0.0 {
+                completed_student_count += 1;
+                format!("{:.0}", weighted_rate_sum / total_weight * 100.0)
             } else {
                 String::new()
             };
@@ -58,6 +72,8 @@ pub fn MatrixTable(
             });
         }
 
+        completed.set(completed_student_count);
+        total.set(students.len());
         table_rows.set(rows);
     });
 
@@ -65,8 +81,8 @@ pub fn MatrixTable(
         div { class: "card bg-base-100 shadow mt-4",
             div { class: "card-body",
                 div { class: "flex items-center gap-3",
-                    div { class: "card-title", "一覧" }
-                    div { class: "text-xs opacity-60", "（受験者×問題の表＋最終得点）" }
+                    div { class: "card-title", "Completed: " }
+                    div { class: "text-lg", "{completed} / {total}" }
                 }
 
                 {
@@ -105,5 +121,3 @@ pub fn MatrixTable(
         }
     }
 }
-
-

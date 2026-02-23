@@ -8,7 +8,12 @@ use ui::{MasterQuestionsPage, MasterStudentsPage, GradingPage};
 use models::Config;
 
 fn main() {
-    launch(App);
+
+    use dioxus::desktop::tao;
+    let window = tao::window::WindowBuilder::new().with_resizable(true);
+    dioxus::LaunchBuilder::new().with_cfg(dioxus::desktop::Config::new().with_window(window).with_menu(None)).launch(App);
+
+    // launch(App);
 }
 
 #[component]

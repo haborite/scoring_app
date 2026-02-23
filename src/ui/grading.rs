@@ -99,17 +99,6 @@ pub fn GradingPage(
                         div { class: "opacity-60", "（未実装）" }
                     }
                 }
-
-                // progress panel card
-                div { class: "card bg-base-100 shadow",
-                    div { class: "card-body",
-                        div { class: "card-title", "進捗" }
-                        div { class: "flex justify-between",
-                            span { "採点済み" }
-                            span { class: "font-mono", "completed_students/total_students" }
-                        }
-                    }
-                }
             }
 
             // table panel card

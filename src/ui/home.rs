@@ -17,7 +17,6 @@ pub fn HomePage(
 ) -> Element {
     rsx! {
         div { style: "padding:16px; font-family: sans-serif;",
-            h2 { "Grading App" }
             SaveBar { config }
             div { style: "display:flex; gap:12px; margin-top:12px;",
                 button { class: "btn btn-primary btn-sm", onclick: move |_| on_nav.call(Page::MasterQuestions), "問題マスタ" }
