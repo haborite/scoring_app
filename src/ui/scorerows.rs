@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::models::Config;
-use crate::ui::scorerow::ScoreRow;
+use crate::ui::ScoreRow;
 
 #[component]
 pub fn ScoreRows(

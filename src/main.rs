@@ -3,10 +3,8 @@ use dioxus::prelude::*;
 mod ui;
 mod models;
 
-use ui::home::{HomePage, Page};
-use ui::master_questions::MasterQuestionsPage;
-use ui::master_students::MasterStudentsPage;
-use ui::grading::GradingPage;
+use ui::{HomePage, Page};
+use ui::{MasterQuestionsPage, MasterStudentsPage, GradingPage};
 use models::Config;
 
 fn main() {

@@ -6,3 +6,14 @@ pub mod scorerow;
 pub mod scorerows;
 pub mod savebar;
 pub mod search;
+pub mod matrix_table;
+
+pub use grading::*;
+pub use home::*;
+pub use master_questions::*;
+pub use master_students::*;
+pub use scorerow::*;
+pub use scorerows::*;
+pub use savebar::*;
+pub use search::*;
+pub use matrix_table::*;

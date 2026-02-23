@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::models::Config;
-use crate::ui::savebar::SaveBar;
+use crate::ui::SaveBar;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Page {

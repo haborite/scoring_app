@@ -78,6 +78,7 @@ pub fn SearchWindow(
                 }
 
                 input {
+                    id: "search",
                     class: "input input-bordered w-full mt-3",
                     placeholder: "例: A001 / 山田",
                     value: "{search_q()}",

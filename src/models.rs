@@ -67,3 +67,10 @@ impl Config {
     
 }
 
+#[derive(Clone)]
+pub struct TableRow {
+    pub student_id: String,
+    pub student_name: String,
+    pub scores: Vec<String>,
+    pub final_display: String,
+}
