@@ -96,7 +96,7 @@ pub fn MatrixTable(
                                         for qname in qnames.iter() {
                                             th { "{qname}" }
                                         }
-                                        th { "final" }
+                                        th { "score" }
                                     }
                                 }
                                 tbody {

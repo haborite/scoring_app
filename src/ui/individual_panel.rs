@@ -4,7 +4,8 @@ use dioxus::prelude::*;
 
 #[component]
 pub fn IndividualPanel(
-    cur_student_idx: Signal<usize>, 
+    cur_student_idx: Signal<usize>,
+    search_open: Signal<bool>,
     config: Signal<Config>
 ) -> Element {
 
@@ -25,9 +26,9 @@ pub fn IndividualPanel(
     });
 
     rsx! {
-        div { class: "grid grid-cols-1 xl:grid-cols-[50rem_1fr] gap-4",
-            ScoreRows { cur_student_idx, cur_question_id, config, focus_idx }
+        div { class: "grid grid-cols-1 xl:grid-cols-[1fr_60rem] gap-4",
             CommentPanel { config, cur_question_id }
+            ScoreRows { cur_student_idx, cur_question_id, config, focus_idx, search_open }
         }
     }
 }
