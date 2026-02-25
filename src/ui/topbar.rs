@@ -30,7 +30,7 @@ pub fn TopBar(
             }
 
             div { class: "navbar-end gap-2",
-                button { class: "btn btn-sm btn-primary", onclick: move |_| config().save(msg), "Save" }
+                button { class: "btn btn-sm btn-primary", onclick: move |_| Config::save(config, msg), "Save" }
                 button { class: "btn btn-sm", onclick: move |_| Config::save_as(config, msg), "Save as" }
                 button { class: "btn btn-sm", onclick: move |_| Config::load(config, msg), "Load" }
             }

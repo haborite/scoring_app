@@ -63,6 +63,7 @@ pub enum Page {
 
 impl Config {
 
+    // Create blunk config
     pub fn new() -> Config {
         Config {
             save_path: None,
@@ -73,6 +74,7 @@ impl Config {
         }
     }
 
+    // Save config to a given filepath
     pub async fn save_to_filepath<P: AsRef<Path>>(
         &self,
         path: P,
@@ -93,10 +95,11 @@ impl Config {
         Ok(())
     }
 
-    pub fn save(&self, mut msg: Signal<String>) {
-        let cfg = self.clone();
+    // Save config to a stored filepath
+    pub fn save(config: Signal<Config>, mut msg: Signal<String>) {
+        let cfg = config().clone();
         let Some(path_str) = cfg.save_path.as_deref() else {
-            msg.set("No save path. Use 'Save as' first.".to_string());
+            Config::save_as(config, msg);
             return
         };
         let path = PathBuf::from(path_str);
@@ -113,6 +116,7 @@ impl Config {
         });
     }
 
+    // Open filedialog, select filepath to be stored, stored to the path, and save the path
     pub fn save_as(mut config: Signal<Config>, mut msg: Signal<String>) {
         spawn(async move {
             let handle = rfd::AsyncFileDialog::new()
@@ -142,6 +146,7 @@ impl Config {
         });
     }
 
+    // Load config from a selected filepath
     pub fn load(mut config: Signal<Config>, mut msg: Signal<String>) {
         spawn(async move {
             let handle = rfd::AsyncFileDialog::new()
