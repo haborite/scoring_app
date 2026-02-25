@@ -90,7 +90,10 @@ pub fn ScoreRow(
                         _ => {}
                     }
                 },
-                onfocus: move |_e| { cur_question_id.set(Some(question_id)); }
+                onfocus: move |_e| { 
+                    // println!("Focused question_id: {}", question_id);
+                    cur_question_id.set(Some(question_id)); 
+                }
             }
             div { class: "text-sm opacity-60", " / {full}" }
             p { class: "validator-hint", "Must be 0 to {full}" }
