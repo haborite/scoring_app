@@ -7,27 +7,18 @@ pub fn CommentPanel(
     cur_question_id: Option<u32>,
 ) -> Element {
 
-    let q_opt = {
-        cur_question_id
-            .and_then(
-                |id| config().questions
-                .into_iter()
-                .find(|q| q.id == id)
-            )
-    };
+    let cfg = config();
 
-    let initial_text = q_opt.clone()
-        .and_then(|q| Some(q.comment.clone()))
-        .unwrap_or_default();
-
+    let (initial_text, question_name) = cur_question_id
+        .and_then(|id| cfg.questions.iter().find(|q| q.id == id))
+        .map(|q| (q.comment.as_str(), q.name.as_str()))
+        .unwrap_or(("", "（問題未選択）"));
+        
     let on_change = move |e: FormEvent| {
-        let new_text = e.value();
-        let qid = match cur_question_id {
-            Some(id) => id,
-            None => return,
-        };
-        if let Some(q) = config.write().questions.iter_mut().find(|q| q.id == qid) {
-            q.comment = new_text;
+        if let Some(id) = cur_question_id {
+            if let Some(q) = config.write().questions.iter_mut().find(|q| q.id == id) {
+                q.comment = e.value();
+            }
         }
     };
 
@@ -35,7 +26,7 @@ pub fn CommentPanel(
         div { class: "card bg-base-100 shadow",
             div { class: "card-body gap-3",
                 div { class: "card-title flex items-center justify-between",
-                    span { {q_opt.map(|q| q.name.clone()).unwrap_or_else(|| "（問題未選択）".to_string())} }
+                    span { {question_name} }
                 }
 
                 {cur_question_id.is_none().then(|| rsx!{
