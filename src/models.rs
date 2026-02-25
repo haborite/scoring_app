@@ -1,5 +1,5 @@
 use serde::{Serialize, Deserialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 use anyhow::{Result, Context};
 use dioxus::prelude::*;
@@ -92,5 +92,132 @@ impl Config {
             .with_context(|| format!("Failed to write file: {:?}", path))?;
         Ok(())
     }
-    
+
+    pub fn save(&self, mut msg: Signal<String>) {
+        let cfg = self.clone();
+        let Some(path_str) = cfg.save_path.as_deref() else {
+            msg.set("No save path. Use 'Save as' first.".to_string());
+            return
+        };
+        let path = PathBuf::from(path_str);
+        spawn(async move {
+            msg.set(format!("Saving to {:?} ...", path));
+            match cfg.save_to_filepath(&path).await {
+                Ok(()) => {
+                    msg.set(format!("Saved: {:?}", path));
+                }
+                Err(e) => {
+                    msg.set(format!("Save failed: {:#}", e));
+                }
+            }
+        });
+    }
+
+    pub fn save_as(mut config: Signal<Config>, mut msg: Signal<String>) {
+        spawn(async move {
+            let handle = rfd::AsyncFileDialog::new()
+                .add_filter("JSON", &["json"])
+                .set_file_name("config.json")
+                .save_file()
+                .await;
+
+            let Some(handle) = handle else {
+                return;
+            };
+
+            let path: PathBuf = handle.path().to_path_buf();
+            let cfg_snapshot = config();
+            msg.set(format!("Saving to {:?} ...", path));
+
+            match cfg_snapshot.save_to_filepath(&path).await {
+                Ok(()) => {
+                    let mut c = config.write();
+                    c.save_path = Some(path.to_string_lossy().to_string());
+                    msg.set(format!("Saved: {:?}", path));
+                }
+                Err(e) => {
+                    msg.set(format!("Save failed: {:#}", e));
+                }
+            }
+        });
+    }
+
+    pub fn load(mut config: Signal<Config>, mut msg: Signal<String>) {
+        spawn(async move {
+            let handle = rfd::AsyncFileDialog::new()
+                .add_filter("JSON", &["json"])
+                .pick_file()
+                .await;
+
+            let Some(handle) = handle else {
+                return;
+            };
+
+            let path = handle.path().to_path_buf();
+
+            let bytes = handle.read().await;
+
+            let txt = match String::from_utf8(bytes) {
+                Ok(s) => s,
+                Err(e) => {
+                    msg.set(format!("Invalid UTF-8: {e}"));
+                    return;
+                }
+            };
+
+            if txt.trim().is_empty() {
+                msg.set("Empty file.".to_string());
+                return;
+            }
+
+            match serde_json::from_str::<Config>(&txt) {
+                Ok(mut cfg) => {
+                    cfg.save_path = Some(path.to_string_lossy().to_string());
+                    config.set(cfg);
+                    msg.set("Loaded.".to_string());
+                }
+                Err(e) => {
+                    msg.set(format_json_error(&txt, e));
+                }
+            }
+        });
+    }
+
 }
+
+fn format_json_error(src: &str, e: serde_json::Error) -> String {
+    let (line, col) = (e.line(), e.column());
+
+    let kind = if e.is_syntax() {
+        "JSON syntax error"
+    } else if e.is_data() {
+        "JSON structure/type mismatch"
+    } else if e.is_eof() {
+        "Unexpected end of file"
+    } else {
+        "JSON parse error"
+    };
+
+    let line_text = src.lines().nth(line.saturating_sub(1)).unwrap_or("");
+    let caret_pad = " ".repeat(col.saturating_sub(1));
+    let caret = format!("{caret_pad}^");
+
+    let hint = if e.is_data() {
+        "Hint: field name misspelled? wrong type? missing field?"
+    } else {
+        ""
+    };
+
+    if line > 0 {
+        format!(
+            "{kind} at line {line}, column {col}: {e}\n\
+             {line_text}\n\
+             {caret}\n\
+             {hint}"
+        )
+    } else {
+        format!("{kind}: {e}\n{hint}")
+    }
+}
+
+

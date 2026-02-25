@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use crate::Page;
-use crate::ui::{SearchWindow, MatrixTable, IndividualPanel, SaveBar};
+use crate::ui::{SearchWindow, MatrixTable, IndividualPanel, TopBar};
 use crate::models::Config;
 
 #[component]
@@ -31,7 +31,7 @@ pub fn GradingPage(
         div {
             class: "min-h-screen p-2 bg-base-200 text-base-content",
             tabindex: "0",
-            SaveBar { config, on_nav }
+            TopBar { config, on_nav }
             { (!msg().is_empty()).then(|| rsx! {
                 div { class: "alert alert-error mb-2", "{msg}" }
             })}

@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use crate::Page;
 use crate::models::{Config, Question};
-use crate::ui::SaveBar;
+use crate::ui::TopBar;
 
 #[component]
 pub fn MasterQuestionsPage(
@@ -12,7 +12,7 @@ pub fn MasterQuestionsPage(
     rsx! {
         div { class: "p-2 space-y-2",
 
-            SaveBar { config, on_nav }
+            TopBar { config, on_nav }
 
             // import panel
             div { class: "card bg-base-100 shadow",

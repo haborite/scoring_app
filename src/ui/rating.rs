@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use std::collections::HashMap;
 use crate::models::{Config, Rating};
-use crate::ui::SaveBar;
+use crate::ui::TopBar;
 use crate::models::Page;
 
 #[component]
@@ -27,7 +27,7 @@ pub fn RatingPage(
     rsx! {
         div { class: "min-h-screen p-2 bg-base-200",
 
-            SaveBar { config, on_nav }
+            TopBar { config, on_nav }
             
             div { class: "grid grid-cols-1 xl:grid-cols-[26rem_1fr] gap-2",
                 RatingEditorCard { config }
