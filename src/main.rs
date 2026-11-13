@@ -4,6 +4,7 @@ use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 
 mod ui;
 mod models;
+mod csv_import;
 
 use ui::{MasterQuestionsPage, MasterStudentsPage, GradingPage, RatingPage};
 use models::{Config, Page};

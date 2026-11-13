@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use crate::Page;
 use crate::models::{Config, Student};
 use crate::ui::TopBar;
+use crate::csv_import::{self, CsvFormat};
 
 #[component]
 pub fn MasterStudentsPage(
@@ -10,6 +11,10 @@ pub fn MasterStudentsPage(
 ) -> Element {
 
     let mut msg = use_signal(String::new);
+    let csv_formats = use_signal(Vec::<CsvFormat>::new);
+    let mut csv_format_name = use_signal(|| "UTAS".to_string());
+
+    use_hook(move || reload_csv_formats(csv_formats, msg));
 
     rsx! {
         div { class: "p-2 space-y-2",
@@ -46,6 +51,77 @@ pub fn MasterStudentsPage(
                             "Import JSON"
                         }
 
+                        div { class: "flex items-center gap-1",
+                            select {
+                                class: "select select-sm w-40",
+                                title: "CSV フォーマット",
+                                // Re-read on focus so edits to csv_formats.json apply without restarting
+                                onfocus: move |_| reload_csv_formats(csv_formats, msg),
+                                onchange: move |e| csv_format_name.set(e.value()),
+                                for f in csv_formats() {
+                                    option {
+                                        value: "{f.name}",
+                                        selected: f.name == csv_format_name(),
+                                        title: "{f.description}",
+                                        "{f.name}"
+                                    }
+                                }
+                            }
+                            button {
+                                class: "btn btn-sm btn-primary",
+                                onclick: move |_| {
+                                    spawn(async move {
+                                        let format = csv_formats.read().iter()
+                                            .find(|f| f.name == csv_format_name())
+                                            .cloned();
+                                        let Some(format) = format else {
+                                            msg.set("CSV フォーマットを選択してください".to_string());
+                                            return;
+                                        };
+                                        let Some(handle) = rfd::AsyncFileDialog::new()
+                                            .add_filter("CSV", &["csv", "tsv", "txt"])
+                                            .pick_file()
+                                            .await
+                                        else {
+                                            return;
+                                        };
+                                        let bytes = handle.read().await;
+                                        match format.parse(&bytes) {
+                                            Ok(result) => {
+                                                let mut m = format!(
+                                                    "{} 人をインポートしました（{} 形式）",
+                                                    result.students.len(),
+                                                    format.name,
+                                                );
+                                                for w in &result.warnings {
+                                                    m.push('\n');
+                                                    m.push_str(w);
+                                                }
+                                                msg.set(m);
+                                                config.write().students = result.students;
+                                            }
+                                            Err(e) => msg.set(format!("{}: {e}", handle.file_name())),
+                                        }
+                                    });
+                                },
+                                "Import CSV"
+                            }
+                        }
+                        button {
+                            class: "btn btn-sm btn-ghost",
+                            title: "CSV フォーマットの定義ファイル (csv_formats.json) があるフォルダを開きます",
+                            onclick: move |_| {
+                                match csv_import::ensure_user_formats_file() {
+                                    Ok(path) => {
+                                        open_folder(&path);
+                                        msg.set(format!("CSV フォーマットの定義ファイル: {}", path.display()));
+                                    }
+                                    Err(e) => msg.set(e),
+                                }
+                            },
+                            "CSV フォーマット定義..."
+                        }
+
                         div { class: "flex-1" }
 
                         button {
@@ -73,11 +149,9 @@ pub fn MasterStudentsPage(
                     }
 
                     p { class: "text-sm opacity-70",
-                        "JSON format is the same as the normal config file. Only "
+                        "Import JSON: 保存ファイルから "
                         code { "students" }
-                        " will be imported; "
-                        code { "questions/scores" }
-                        " are ignored."
+                        " だけを取り込みます。Import CSV: 選んだフォーマットで CSV を読み込みます。どちらも受験者一覧を置き換えます（点数は学籍番号で対応付けられるため保持されます）。"
                     }
                 }
             }
@@ -177,6 +251,28 @@ fn next_student_id(id: &str) -> String {
     let digits: String = id.chars().skip(prefix.chars().count()).take_while(|c| c.is_ascii_digit()).collect();
     let next = digits.parse::<u64>().unwrap_or(0).saturating_add(1);
     format!("{prefix}{next:0width$}", width = digits.len())
+}
+
+fn reload_csv_formats(mut formats: Signal<Vec<CsvFormat>>, mut msg: Signal<String>) {
+    let (loaded, errors) = csv_import::load_formats();
+    if !errors.is_empty() {
+        msg.set(errors.join("\n"));
+    }
+    if *formats.peek() != loaded {
+        formats.set(loaded);
+    }
+}
+
+// Show the file in the OS file manager
+fn open_folder(path: &std::path::Path) {
+    let dir = path.parent().unwrap_or(path);
+    #[cfg(target_os = "windows")]
+    let cmd = std::process::Command::new("explorer").arg(dir).spawn();
+    #[cfg(target_os = "macos")]
+    let cmd = std::process::Command::new("open").arg(dir).spawn();
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let cmd = std::process::Command::new("xdg-open").arg(dir).spawn();
+    let _ = cmd;
 }
 
 #[cfg(test)]
