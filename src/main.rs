@@ -5,9 +5,11 @@ use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 mod ui;
 mod models;
 mod csv_import;
+mod shortcuts;
 
-use ui::{MasterQuestionsPage, MasterStudentsPage, GradingPage, RatingPage};
-use models::{Config, Page};
+use ui::{MasterQuestionsPage, MasterStudentsPage, GradingPage, RatingPage, use_grading_state, TopBar};
+use models::{Config, Page, Status};
+use shortcuts::Shortcut;
 
 fn main() {
     let window = tao::window::WindowBuilder::new()
@@ -28,6 +30,34 @@ fn main() {
 fn App() -> Element {
     let mut page = use_signal(|| Page::Grading);
     let mut config = use_signal(|| Config::new());
+    let status = use_signal(Status::default);
+    // Lives here so the current student survives page switches
+    let grading = use_grading_state();
+
+    // Keyboard shortcuts, wherever the focus is
+    use_future(move || async move {
+        let mut listener = document::eval(&shortcuts::listener_js());
+        while let Ok(combo) = listener.recv::<String>().await {
+            let Some(shortcut) = Shortcut::from_combo(&combo) else {
+                continue;
+            };
+            match shortcut {
+                Shortcut::Save => Config::save(config, status),
+                Shortcut::SaveAs => Config::save_as(config, status),
+                Shortcut::Load => Config::load(config, status),
+                Shortcut::Goto(p) => page.set(p),
+                Shortcut::Search => {
+                    page.set(Page::Grading);
+                    grading.open_search();
+                }
+                Shortcut::PrevStudent if page() == Page::Grading => grading.prev_student(),
+                Shortcut::NextStudent if page() == Page::Grading => {
+                    grading.next_student(config.peek().students.len())
+                }
+                Shortcut::PrevStudent | Shortcut::NextStudent => {}
+            }
+        }
+    });
 
     // Window title: file name and unsaved mark
     use_effect(move || {
@@ -66,31 +96,14 @@ fn App() -> Element {
 
     rsx! {
         document::Stylesheet { href: asset!("assets/tailwind.css") }
-        match *page.read() {
-            Page::MasterQuestions => rsx! {
-                MasterQuestionsPage {
-                    on_nav: move |p| page.set(p),
-                    config,
-                }
-            },
-            Page::MasterStudents => rsx! {
-                MasterStudentsPage {
-                    on_nav: move |p| page.set(p),
-                    config,
-                }
-            },
-            Page::Grading => rsx! {
-                GradingPage { 
-                    on_nav: move |p| page.set(p),
-                    config,                    
-                }
-            },
-            Page::Rating => rsx! {
-                RatingPage {
-                    on_nav: move |p| page.set(p),
-                    config,
-                }
-            },
+        div { class: "min-h-screen p-2 bg-base-200 text-base-content",
+            TopBar { config, page, status }
+            match page() {
+                Page::MasterQuestions => rsx! { MasterQuestionsPage { config } },
+                Page::MasterStudents => rsx! { MasterStudentsPage { config } },
+                Page::Grading => rsx! { GradingPage { config, state: grading } },
+                Page::Rating => rsx! { RatingPage { config } },
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::fs;
 use anyhow::{Result, Context};
 use dioxus::prelude::*;
@@ -58,7 +59,47 @@ pub struct TableRow {
     pub final_display: String,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+// Message shown in the top bar
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Status {
+    pub text: String,
+    pub error: bool,
+}
+
+impl Status {
+    pub fn info(text: impl Into<String>) -> Self {
+        Status { text: text.into(), error: false }
+    }
+
+    pub fn error(text: impl Into<String>) -> Self {
+        Status { text: text.into(), error: true }
+    }
+}
+
+// Keeps keyboard shortcuts from stacking up file dialogs while one is open
+static DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
+
+struct DialogGuard;
+
+impl DialogGuard {
+    fn acquire() -> Option<Self> {
+        (!DIALOG_OPEN.swap(true, Ordering::SeqCst)).then_some(DialogGuard)
+    }
+}
+
+impl Drop for DialogGuard {
+    fn drop(&mut self) {
+        DIALOG_OPEN.store(false, Ordering::SeqCst);
+    }
+}
+
+fn display_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     MasterQuestions,
     MasterStudents,
@@ -230,35 +271,36 @@ impl Config {
     }
 
     // Save config to a stored filepath
-    pub fn save(config: Signal<Config>, mut msg: Signal<String>) {
-        let cfg = config().clone();
+    pub fn save(config: Signal<Config>, mut status: Signal<Status>) {
+        let cfg = config();
         let Some(path_str) = cfg.save_path.as_deref() else {
-            Config::save_as(config, msg);
+            Config::save_as(config, status);
             return
         };
         let path = PathBuf::from(path_str);
         spawn(async move {
-            msg.set(format!("Saving to {:?} ...", path));
             match cfg.save_to_filepath(&path).await {
                 Ok(()) => {
                     cfg.mark_saved();
-                    msg.set(format!("Saved: {:?}", path));
+                    status.set(Status::info(format!("保存しました: {}", display_name(&path))));
                 }
-                Err(e) => {
-                    msg.set(format!("Save failed: {:#}", e));
-                }
+                Err(e) => status.set(Status::error(format!("保存に失敗しました: {e:#}"))),
             }
         });
     }
 
     // Open filedialog, select filepath to be stored, stored to the path, and save the path
-    pub fn save_as(mut config: Signal<Config>, mut msg: Signal<String>) {
+    pub fn save_as(mut config: Signal<Config>, mut status: Signal<Status>) {
+        let Some(guard) = DialogGuard::acquire() else {
+            return;
+        };
         spawn(async move {
             let handle = rfd::AsyncFileDialog::new()
                 .add_filter("JSON", &["json"])
                 .set_file_name("config.json")
                 .save_file()
                 .await;
+            drop(guard);
 
             let Some(handle) = handle else {
                 return;
@@ -266,44 +308,57 @@ impl Config {
 
             let path: PathBuf = handle.path().to_path_buf();
             let cfg_snapshot = config();
-            msg.set(format!("Saving to {:?} ...", path));
 
             match cfg_snapshot.save_to_filepath(&path).await {
                 Ok(()) => {
                     cfg_snapshot.mark_saved();
                     let mut c = config.write();
                     c.save_path = Some(path.to_string_lossy().to_string());
-                    msg.set(format!("Saved: {:?}", path));
+                    status.set(Status::info(format!("保存しました: {}", display_name(&path))));
                 }
-                Err(e) => {
-                    msg.set(format!("Save failed: {:#}", e));
-                }
+                Err(e) => status.set(Status::error(format!("保存に失敗しました: {e:#}"))),
             }
         });
     }
 
     // Load config from a selected filepath
-    pub fn load(mut config: Signal<Config>, mut msg: Signal<String>) {
+    pub fn load(mut config: Signal<Config>, mut status: Signal<Status>) {
         spawn(async move {
+            if config.peek().is_dirty() {
+                let answer = rfd::AsyncMessageDialog::new()
+                    .set_level(rfd::MessageLevel::Warning)
+                    .set_title("Scoring App")
+                    .set_description("保存していない変更があります。変更を破棄して別のファイルを読み込みますか？")
+                    .set_buttons(rfd::MessageButtons::OkCancel)
+                    .show()
+                    .await;
+                if answer != rfd::MessageDialogResult::Ok {
+                    return;
+                }
+            }
             match Config::pick_file().await {
                 Ok(Some((path, mut cfg))) => {
                     cfg.save_path = Some(path.to_string_lossy().to_string());
                     cfg.mark_saved();
                     config.set(cfg);
-                    msg.set("Loaded.".to_string());
+                    status.set(Status::info(format!("読み込みました: {}", display_name(&path))));
                 }
                 Ok(None) => {}
-                Err(e) => msg.set(e),
+                Err(e) => status.set(Status::error(e)),
             }
         });
     }
 
     // Open filedialog and parse the selected file. Ok(None) if canceled.
     pub async fn pick_file() -> std::result::Result<Option<(PathBuf, Config)>, String> {
+        let Some(guard) = DialogGuard::acquire() else {
+            return Ok(None);
+        };
         let handle = rfd::AsyncFileDialog::new()
             .add_filter("JSON", &["json"])
             .pick_file()
             .await;
+        drop(guard);
 
         let Some(handle) = handle else {
             return Ok(None);

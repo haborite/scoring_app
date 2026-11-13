@@ -7,7 +7,7 @@ edition = "2021"
 anyhow = "1"
 thiserror = "1"
 
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
 dioxus = { version = "0.7", features = ["desktop"] }
 dioxus-desktop = "0.7"

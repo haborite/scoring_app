@@ -39,7 +39,8 @@ pub fn CommentPanel(
                     class: "textarea textarea-bordered w-full h-full font-mono text-sm leading-snug",
                     placeholder: "各問題に対する採点上の注意点やメモ等を記述",
                     value: initial_text,
-                    onchange: on_change,
+                    // Per keystroke so that a save (Ctrl+S) always includes it
+                    oninput: on_change,
                 }
 
             }

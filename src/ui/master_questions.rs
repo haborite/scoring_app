@@ -1,20 +1,15 @@
 use dioxus::prelude::*;
-use crate::Page;
 use crate::models::{Config, Question};
-use crate::ui::TopBar;
 
 #[component]
 pub fn MasterQuestionsPage(
-    on_nav: EventHandler<Page>,
     config: Signal<Config>,
 ) -> Element {
 
     let mut msg = use_signal(String::new);
 
     rsx! {
-        div { class: "p-2 space-y-2",
-
-            TopBar { config, on_nav }
+        div { class: "space-y-2",
 
             {(!msg().is_empty()).then(|| rsx! {
                 div { class: "alert alert-warning py-2 whitespace-pre-wrap font-mono text-sm",
@@ -57,8 +52,8 @@ pub fn MasterQuestionsPage(
 
                                 qs.push(Question {
                                     id: next_id,
-                                    name: String::new(),
-                                    full_score: 0,
+                                    name: format!("問{next_id}"),
+                                    full_score: 10,
                                     weight: 1.0,
                                     comment: String::new(),
                                 });
