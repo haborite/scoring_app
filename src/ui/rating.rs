@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-use std::collections::HashMap;
 use crate::models::{Config, Rating};
 use crate::ui::TopBar;
 use crate::models::Page;
@@ -13,35 +12,38 @@ pub fn RatingPage(
     // ===== final スコア一覧（未入力除外） =====
     let final_scores = {
         let cfg = config.read();
+        let score_map = cfg.score_map();
         cfg.students.iter()
-            .filter_map(|s| calc_final_percent(&cfg, &s.id)) // Option<u32>
+            .filter_map(|s| cfg.final_score(&score_map, &s.id))
             .collect::<Vec<u32>>()
     };
+    let student_count = config.read().students.len();
 
     // ===== rating 割当結果 =====
-    let rating_stats = {
-        let cfg = config.read();
-        compute_rating_stats(&final_scores, &cfg.ratings)
-    };
+    let rating_stats = compute_rating_stats(&final_scores, &config.read().ratings);
 
     rsx! {
         div { class: "min-h-screen p-2 bg-base-200",
 
             TopBar { config, on_nav }
-            
+
             div { class: "grid grid-cols-1 xl:grid-cols-[26rem_1fr] gap-2",
                 RatingEditorCard { config }
-                RatingStatsCard { stats: rating_stats.clone() }
+                RatingStatsCard {
+                    stats: rating_stats,
+                    scored: final_scores.len(),
+                    student_count,
+                }
             }
             div { class: "mt-2",
-                HistogramCard { scores: final_scores, ratings: config().ratings.clone() }
+                HistogramCard { scores: final_scores }
             }
         }
     }
 }
 
 #[component]
-fn RatingEditorCard(config: Signal<Config>) -> Element {
+fn RatingEditorCard(mut config: Signal<Config>) -> Element {
 
     let ratings = config().ratings.clone();
 
@@ -60,9 +62,9 @@ fn RatingEditorCard(config: Signal<Config>) -> Element {
                                     class: "input input-sm input-bordered w-24",
                                     value: "{r.label}",
                                     oninput: move |e| {
-                                        let mut cfg = config.read().clone();
-                                        cfg.ratings[i].label = e.value();
-                                        config.set(cfg);
+                                        if let Some(r) = config.write().ratings.get_mut(i) {
+                                            r.label = e.value();
+                                        }
                                     }
                                 }
 
@@ -74,15 +76,30 @@ fn RatingEditorCard(config: Signal<Config>) -> Element {
                                     value: "{r.min_score}",
                                     oninput: move |e| {
                                         if let Ok(v) = e.value().parse::<u32>() {
-                                            let mut cfg = config.read().clone();
-                                            cfg.ratings[i].min_score = v.min(100);
-                                            cfg.ratings.sort_by(|a,b| b.min_score.cmp(&a.min_score));
-                                            config.set(cfg);
+                                            if let Some(r) = config.write().ratings.get_mut(i) {
+                                                r.min_score = v.min(100);
+                                            }
                                         }
+                                    },
+                                    // Reorder only after editing is committed; sorting per keystroke
+                                    // moves the row away from the input being typed into
+                                    onchange: move |_| {
+                                        config.write().ratings.sort_by(|a, b| b.min_score.cmp(&a.min_score));
                                     }
                                 }
 
                                 span { class: "text-sm opacity-60", "以上" }
+
+                                button {
+                                    class: "btn btn-xs btn-ghost ml-auto",
+                                    onclick: move |_| {
+                                        let mut cfg = config.write();
+                                        if i < cfg.ratings.len() {
+                                            cfg.ratings.remove(i);
+                                        }
+                                    },
+                                    "Del"
+                                }
                             }
                         }
                     })
@@ -91,12 +108,10 @@ fn RatingEditorCard(config: Signal<Config>) -> Element {
                 button {
                     class: "btn btn-xs mt-2",
                     onclick: move |_| {
-                        let mut cfg = config.read().clone();
-                        cfg.ratings.push(Rating {
+                        config.write().ratings.push(Rating {
                             label: "New".to_string(),
                             min_score: 0,
                         });
-                        config.set(cfg);
                     },
                     "区分を追加"
                 }
@@ -106,11 +121,18 @@ fn RatingEditorCard(config: Signal<Config>) -> Element {
 }
 
 #[component]
-fn RatingStatsCard(stats: Vec<RatingStats>) -> Element {
+fn RatingStatsCard(
+    stats: Vec<RatingStats>,
+    scored: usize,
+    student_count: usize,
+) -> Element {
     rsx! {
         div { class: "card bg-base-100 shadow",
             div { class: "card-body",
                 div { class: "card-title", "人数・割合" }
+                div { class: "text-sm opacity-70",
+                    "集計対象: {scored} / {student_count} 人（未入力のある受験者は除外）"
+                }
 
                 table { class: "table table-sm",
                     thead {
@@ -122,11 +144,14 @@ fn RatingStatsCard(stats: Vec<RatingStats>) -> Element {
                     }
                     tbody {
                         {
-                            stats.iter().map(|s| rsx! {
-                                tr {
-                                    td { "{s.label}" }
-                                    td { "{s.count}" }
-                                    td { "{s.ratio * 100.0}%" }
+                            stats.iter().map(|s| {
+                                let pct = format!("{:.1}", s.ratio * 100.0);
+                                rsx! {
+                                    tr {
+                                        td { "{s.label}" }
+                                        td { "{s.count}" }
+                                        td { "{pct}%" }
+                                    }
                                 }
                             })
                         }
@@ -140,12 +165,12 @@ fn RatingStatsCard(stats: Vec<RatingStats>) -> Element {
 #[component]
 fn HistogramCard(
     scores: Vec<u32>,
-    ratings: Vec<Rating>,
 ) -> Element {
 
-    let bins = histogram(&scores, 5); // 5点刻み
+    let bin_width = 5; // 5点刻み
+    let bins = histogram(&scores, bin_width);
 
-    let max = bins.iter().copied().max().unwrap_or(1);
+    let max = bins.iter().copied().max().unwrap_or(0).max(1);
 
     rsx! {
         div { class: "card bg-base-100 shadow",
@@ -153,16 +178,31 @@ fn HistogramCard(
                 div { class: "card-title", "ヒストグラム（5点刻み）" }
 
                 div { class: "flex items-end gap-1 h-40",
-
                     {
-                        bins.iter().enumerate().map(|(_i, &count)| {
-                            let height = (count as f32 / max as f32) * 100.0;
+                        bins.iter().enumerate().map(|(i, &count)| {
+                            let height = count as f32 / max as f32 * 100.0;
+                            let lo = i as u32 * bin_width;
+                            let range = if lo >= 100 {
+                                "100".to_string()
+                            } else {
+                                format!("{lo}-{}", lo + bin_width - 1)
+                            };
                             rsx! {
                                 div {
-                                    class: "bg-primary w-3",
-                                    style: "height: {height}%;"
+                                    class: "bg-primary w-6",
+                                    style: "height: {height}%;",
+                                    title: "{range}: {count} 人",
                                 }
                             }
+                        })
+                    }
+                }
+                div { class: "flex gap-1 text-xs opacity-60",
+                    {
+                        bins.iter().enumerate().map(|(i, _)| {
+                            let lo = i as u32 * bin_width;
+                            let label = if lo % 10 == 0 { lo.to_string() } else { String::new() };
+                            rsx! { div { class: "w-6 text-left", "{label}" } }
                         })
                     }
                 }
@@ -183,62 +223,38 @@ fn compute_rating_stats(
     ratings: &[Rating],
 ) -> Vec<RatingStats> {
 
+    // Highest threshold first, regardless of the display order
+    let mut order: Vec<usize> = (0..ratings.len()).collect();
+    order.sort_by(|&a, &b| ratings[b].min_score.cmp(&ratings[a].min_score));
+
     let mut counts = vec![0usize; ratings.len()];
+    let mut unrated = 0usize;
 
     for &s in scores {
-        if let Some((i, _)) = ratings.iter()
-            .enumerate()
-            .find(|(_, r)| s >= r.min_score)
-        {
-            counts[i] += 1;
+        match order.iter().find(|&&i| s >= ratings[i].min_score) {
+            Some(&i) => counts[i] += 1,
+            None => unrated += 1,
         }
     }
 
     let total = scores.len().max(1);
 
-    ratings.iter().enumerate().map(|(i, r)| {
+    let mut stats: Vec<RatingStats> = order.iter().map(|&i| {
         RatingStats {
-            label: r.label.clone(),
+            label: ratings[i].label.clone(),
             count: counts[i],
             ratio: counts[i] as f32 / total as f32,
         }
-    }).collect()
-}
+    }).collect();
 
-fn calc_final_percent( config: &Config, student_id: &str) -> Option<u32> {
-    // let cfg = config;
-    let questions = &config.questions;
-
-    let score_map: HashMap<(&str, u32), Option<u32>> = config.scores
-        .iter()
-        .map(|s| ((s.student_id.as_str(), s.question_id), s.score))
-        .collect();
-
-    let total_weight: f32 = questions.iter().map(|q| q.weight).sum();
-    let mut weighted_rate_sum: f32 = 0.0;
-
-    for q in questions.iter() {
-        match score_map
-            .get(&(student_id, q.id))
-            .copied()
-            .flatten()
-        {
-            Some(scv) => {
-                if q.full_score > 0 {
-                    let rate = scv as f32 / q.full_score as f32;
-                    weighted_rate_sum += rate * q.weight;
-                } else {
-                    return None; // full_score=0 は未入力扱い
-                }
-            }
-            None => return None, // 未入力
-        }
+    if unrated > 0 {
+        stats.push(RatingStats {
+            label: "（区分なし）".to_string(),
+            count: unrated,
+            ratio: unrated as f32 / total as f32,
+        });
     }
-    if total_weight > 0.0 {
-        Some((weighted_rate_sum / total_weight * 100.0) as u32)
-    } else {
-        None
-    }
+    stats
 }
 
 fn histogram(scores: &[u32], bin_width: u32) -> Vec<usize> {
@@ -249,4 +265,29 @@ fn histogram(scores: &[u32], bin_width: u32) -> Vec<usize> {
         h[idx] += 1;
     }
     h
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn r(label: &str, min_score: u32) -> Rating {
+        Rating { label: label.to_string(), min_score }
+    }
+
+    #[test]
+    fn stats_ignore_display_order_and_count_unrated() {
+        // Not sorted: as while the user is still editing
+        let ratings = vec![r("C", 60), r("A", 80), r("B", 70)];
+        let stats = compute_rating_stats(&[85, 75, 65, 50], &ratings);
+        let got: Vec<(&str, usize)> = stats.iter().map(|s| (s.label.as_str(), s.count)).collect();
+        assert_eq!(got, vec![("A", 1), ("B", 1), ("C", 1), ("（区分なし）", 1)]);
+    }
+
+    #[test]
+    fn histogram_puts_100_in_last_bin() {
+        let h = histogram(&[0, 4, 5, 100], 5);
+        assert_eq!(h.len(), 21);
+        assert_eq!((h[0], h[1], h[20]), (2, 1, 1));
+    }
 }

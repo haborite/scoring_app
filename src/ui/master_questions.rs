@@ -9,43 +9,38 @@ pub fn MasterQuestionsPage(
     config: Signal<Config>,
 ) -> Element {
 
+    let mut msg = use_signal(String::new);
+
     rsx! {
         div { class: "p-2 space-y-2",
 
             TopBar { config, on_nav }
+
+            {(!msg().is_empty()).then(|| rsx! {
+                div { class: "alert alert-warning py-2 whitespace-pre-wrap font-mono text-sm",
+                    span { class: "flex-1", "{msg}" }
+                    button { class: "btn btn-xs btn-ghost", onclick: move |_| msg.set(String::new()), "✕" }
+                }
+            })}
 
             // import panel
             div { class: "card bg-base-100 shadow",
                 div { class: "card-body p-2 space-y-3",
 
                     div { class: "flex flex-wrap items-center gap-2",
-                        input {
-                            id: "questions_import",
-                            r#type: "file",
-                            accept: "application/json,.json",
-                            class: "file-input file-input-bordered file-input-sm w-full max-w-md",
-                        }
                         button {
                             class: "btn btn-sm btn-primary",
                             onclick: move |_| {
                                 spawn(async move {
-                                    let txt = match read_questions_json_text().await {
-                                        Ok(Some(s)) => s,
-                                        Ok(None) => return, // canceled / no file
-                                        Err(_) => return,
-                                    };
-                                    if txt.trim().is_empty() {
-                                        return;
-                                    }
-
                                     // 通常の Config 形式として読むが questions だけ使う
-                                    let parsed: Result<Config, _> = serde_json::from_str(&txt);
-                                    let Ok(cfg) = parsed else {
-                                        return;
-                                    };
-
-                                    // Signal<Vec<Question>> を差し替え
-                                    config.write().questions = cfg.questions;
+                                    match Config::pick_file().await {
+                                        Ok(Some((_, cfg))) => {
+                                            msg.set(format!("{} 問をインポートしました", cfg.questions.len()));
+                                            config.write().questions = cfg.questions;
+                                        }
+                                        Ok(None) => {}
+                                        Err(e) => msg.set(e),
+                                    }
                                 });
                             },
                             "Import JSON"
@@ -108,7 +103,7 @@ pub fn MasterQuestionsPage(
                             }
                             tbody {
                                 for (idx, _q) in config.read().questions.iter().cloned().enumerate() {
-                                    QuestionRow { key: "{idx}", idx, config }
+                                    QuestionRow { key: "{idx}", idx, config, msg }
                                 }
                             }
                         }
@@ -123,6 +118,7 @@ pub fn MasterQuestionsPage(
 pub fn QuestionRow(
     idx: usize,
     config: Signal<Config>,
+    msg: Signal<String>,
 ) -> Element {
     let q = config.read().questions.get(idx).cloned();
     let Some(q) = q else {
@@ -133,12 +129,27 @@ pub fn QuestionRow(
         tr {
             td {
                 input {
+                    id: "question-id-{idx}",
                     class: "input input-bordered input-sm w-20",
                     r#type: "number",
+                    min: 0,
                     value: "{q.id}",
-                    oninput: move |ev| {
-                        let v = ev.value().parse::<u32>().unwrap_or(0);
-                        config.write().questions.get_mut(idx).unwrap().id = v;
+                    // Applied on commit (not per keystroke) so scores can be carried over safely
+                    onchange: move |ev| {
+                        let result = match ev.value().parse::<u32>() {
+                            Ok(v) => config.write().rename_question(idx, v),
+                            Err(_) => Err("問題 id には 0 以上の整数を入力してください".to_string()),
+                        };
+                        match result {
+                            Ok(()) => msg.set(String::new()),
+                            Err(e) => {
+                                msg.set(e);
+                                let _ = document::eval(&format!(
+                                    r#"document.getElementById("question-id-{idx}").value = "{}";"#,
+                                    q.id
+                                ));
+                            }
+                        }
                     }
                 }
             }
@@ -148,7 +159,7 @@ pub fn QuestionRow(
                     value: "{q.name}",
                     oninput: move |ev| {
                         let v = ev.value();
-                        config.write().questions.get_mut(idx).unwrap().name = v;
+                        if let Some(q) = config.write().questions.get_mut(idx) { q.name = v; }
                     }
                 }
             }
@@ -159,7 +170,7 @@ pub fn QuestionRow(
                     value: "{q.full_score}",
                     oninput: move |ev| {
                         let v = ev.value().parse::<u32>().unwrap_or(0);
-                        config.write().questions.get_mut(idx).unwrap().full_score = v;
+                        if let Some(q) = config.write().questions.get_mut(idx) { q.full_score = v; }
                     }
                 }
             }
@@ -171,7 +182,7 @@ pub fn QuestionRow(
                     value: "{q.weight}",
                     oninput: move |ev| {
                         let v = ev.value().parse::<f32>().unwrap_or(0.0);
-                        config.write().questions.get_mut(idx).unwrap().weight = v;
+                        if let Some(q) = config.write().questions.get_mut(idx) { q.weight = v; }
                     }
                 }
             }
@@ -181,7 +192,7 @@ pub fn QuestionRow(
                     value: "{q.comment}",
                     oninput: move |ev| {
                         let v = ev.value();
-                        config.write().questions.get_mut(idx).unwrap().comment = v;
+                        if let Some(q) = config.write().questions.get_mut(idx) { q.comment = v; }
                     }
                 }
             }
@@ -198,24 +209,5 @@ pub fn QuestionRow(
                 }
             }
         }
-    }
-}
-
-async fn read_questions_json_text() -> Result<Option<String>, String> {
-    let handle = rfd::AsyncFileDialog::new()
-        .add_filter("JSON", &["json"])
-        .pick_file()
-        .await;
-
-    let Some(handle) = handle else {
-        return Ok(None);
-    };
-
-    let bytes = handle.read().await;
-    let s = String::from_utf8(bytes).map_err(|e| format!("Invalid UTF-8: {e}"))?;
-    if s.trim().is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(s))
     }
 }

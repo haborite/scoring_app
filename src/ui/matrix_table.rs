@@ -1,6 +1,5 @@
 use dioxus::prelude::*;
 use crate::models::{Config, TableRow};
-use std::collections::HashMap;
 
 #[component]
 pub fn MatrixTable(
@@ -17,49 +16,28 @@ pub fn MatrixTable(
         let students = &cfg.students;
         let questions = &cfg.questions;
 
-        let score_map: HashMap<(&str, u32), Option<u32>> = cfg.scores
-            .iter()
-            .map(|s| ((s.student_id.as_str(), s.question_id), s.score))
-            .collect();
-
-        let total_weight: f32 = questions.iter().map(|q| q.weight).sum();
+        let score_map = cfg.score_map();
 
         let mut completed_student_count = 0usize;
         let mut rows: Vec<TableRow> = Vec::with_capacity(students.len());
 
         for student in students.iter() {
-            let mut filled = true;
-            let mut score_strings = Vec::with_capacity(questions.len());
+            let score_strings = questions.iter()
+                .map(|q| {
+                    score_map.get(&(student.id.as_str(), q.id))
+                        .copied()
+                        .flatten()
+                        .map(|scv| scv.to_string())
+                        .unwrap_or_default()
+                })
+                .collect();
 
-            let mut weighted_rate_sum: f32 = 0.0;
-
-            for q in questions.iter() {
-                match score_map
-                    .get(&(student.id.as_str(), q.id))
-                    .copied()
-                    .flatten()
-                {
-                    Some(scv) => {
-                        score_strings.push(scv.to_string());
-                        if q.full_score > 0 {
-                            let rate = scv as f32 / q.full_score as f32;
-                            weighted_rate_sum += rate * q.weight;
-                        } else {
-                            filled = false;
-                        }
-                    }
-                    None => {
-                        score_strings.push(String::new());
-                        filled = false;
-                    }
+            let final_display = match cfg.final_score(&score_map, &student.id) {
+                Some(f) => {
+                    completed_student_count += 1;
+                    f.to_string()
                 }
-            }
-
-            let final_display = if filled && total_weight > 0.0 {
-                completed_student_count += 1;
-                format!("{:.0}", weighted_rate_sum / total_weight * 100.0)
-            } else {
-                String::new()
+                None => String::new(),
             };
 
             rows.push(TableRow {
