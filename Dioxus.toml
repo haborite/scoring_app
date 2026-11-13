@@ -8,3 +8,12 @@ short_description = "Desktop app for exam grading and rating"
 long_description = "A keyboard-driven desktop app to register questions and examinees, enter scores quickly, and aggregate final grades."
 copyright = "Copyright (c) 2026 haborite"
 category = "Education"
+# icons/icon.ico first: on Windows dx uses the first entry (and icons/icon.ico is its default path)
+icon = [
+    "icons/icon.ico",
+    "icons/32x32.png",
+    "icons/128x128.png",
+    "icons/128x128@2x.png",
+    "icons/icon.png",
+    "icons/icon.icns",
+]
