@@ -9,9 +9,17 @@ pub fn GradingPage(
     config: Signal<Config>,
 ) -> Element {
     
-    let cur_student_idx = use_signal(|| 0usize);
+    let mut cur_student_idx = use_signal(|| 0usize);
     let search_open = use_signal(|| false);    
     let msg = use_signal(|| String::new());
+
+    // Keep the index in range after students are deleted or another file is loaded
+    use_effect(move || {
+        let len = config.read().students.len();
+        if cur_student_idx() >= len {
+            cur_student_idx.set(len.saturating_sub(1));
+        }
+    });
 
     use_effect(move || {
         let el_id = if search_open() { "search" } else { "score-0" };

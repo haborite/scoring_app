@@ -34,7 +34,10 @@ pub fn ScoreRow(
                 value: config().scores
                     .iter()
                     .find(|sc| sc.question_id == question_id && sc.student_id == student_id )
-                    .map(|sc| if let Some(scv) = sc.score { scv.to_string() } else { String::new() }),
+                    .and_then(|sc| sc.score)
+                    .map(|scv| scv.to_string())
+                    // Always pass a string: None would leave the previous student's value in the DOM
+                    .unwrap_or_default(),
                 min: 0,
                 max: full,
                 required: true,
@@ -42,6 +45,9 @@ pub fn ScoreRow(
                 autofocus: is_focused,
 
                 oninput: move |e| {
+                    if student_id.is_empty() {
+                        return;
+                    }
                     let mut s = e.value();
                     s.retain(|c| c.is_ascii_digit());
                     let mut binding = config.write();

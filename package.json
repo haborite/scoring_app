@@ -1,6 +1,13 @@
 {
+  "scripts": {
+    "css": "tailwindcss -i ./input.css -o ./assets/tailwind.css --minify",
+    "css:watch": "tailwindcss -i ./input.css -o ./assets/tailwind.css --watch"
+  },
   "dependencies": {
     "daisyui": "^5.5.19",
     "tailwindcss": "^4.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.5"
   }
 }
