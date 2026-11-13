@@ -61,9 +61,29 @@ jobs:
         run: cargo test --locked
 
       - uses: cargo-bins/cargo-binstall@main
+        if: runner.os != 'Linux'
 
       - name: Install Dioxus CLI
+        if: runner.os != 'Linux'
         run: cargo binstall dioxus-cli@${{ env.DX_VERSION }} --no-confirm --force
+
+      # The prebuilt dx needs glibc >= 2.38, which ubuntu-22.04 lacks. Building on 22.04 keeps
+      # the bundles compatible with older distros, so build dx from source (cached) instead.
+      - name: Cache Dioxus CLI (Linux)
+        if: runner.os == 'Linux'
+        id: dx-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.dx-cli
+          key: dx-cli-${{ env.DX_VERSION }}-${{ matrix.os }}
+
+      - name: Build Dioxus CLI (Linux)
+        if: runner.os == 'Linux' && steps.dx-cache.outputs.cache-hit != 'true'
+        run: cargo install dioxus-cli@${{ env.DX_VERSION }} --locked --root ~/.dx-cli
+
+      - name: Add Dioxus CLI to PATH (Linux)
+        if: runner.os == 'Linux'
+        run: echo "$HOME/.dx-cli/bin" >> "$GITHUB_PATH"
 
       - name: Bundle
         run: dx bundle --desktop --release ${{ matrix.package-types }} --out-dir dist
