@@ -1,12 +1,9 @@
 use dioxus::prelude::*;
-use crate::Page;
 use crate::models::{Config, Student};
-use crate::ui::TopBar;
 use crate::csv_import::{self, CsvFormat};
 
 #[component]
 pub fn MasterStudentsPage(
-    on_nav: EventHandler<Page>,
     config: Signal<Config>,
 ) -> Element {
 
@@ -17,9 +14,7 @@ pub fn MasterStudentsPage(
     use_hook(move || reload_csv_formats(csv_formats, msg));
 
     rsx! {
-        div { class: "p-2 space-y-2",
-
-            TopBar { config, on_nav }
+        div { class: "space-y-2",
 
             {(!msg().is_empty()).then(|| rsx! {
                 div { class: "alert alert-warning py-2 whitespace-pre-wrap font-mono text-sm",

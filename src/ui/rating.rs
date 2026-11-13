@@ -1,11 +1,8 @@
 use dioxus::prelude::*;
 use crate::models::{Config, Rating};
-use crate::ui::TopBar;
-use crate::models::Page;
 
 #[component]
 pub fn RatingPage(
-    on_nav: EventHandler<Page>,
     config: Signal<Config>,
 ) -> Element {
 
@@ -23,9 +20,7 @@ pub fn RatingPage(
     let rating_stats = compute_rating_stats(&final_scores, &config.read().ratings);
 
     rsx! {
-        div { class: "min-h-screen p-2 bg-base-200",
-
-            TopBar { config, on_nav }
+        div {
 
             div { class: "grid grid-cols-1 xl:grid-cols-[26rem_1fr] gap-2",
                 RatingEditorCard { config }

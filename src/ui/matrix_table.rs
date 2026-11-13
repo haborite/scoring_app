@@ -4,6 +4,7 @@ use crate::models::{Config, TableRow};
 #[component]
 pub fn MatrixTable(
     config: Signal<Config>,
+    cur_student_idx: Signal<usize>,
 ) -> Element {
 
     // Table row
@@ -66,7 +67,7 @@ pub fn MatrixTable(
                     let qnames = config().questions.iter().map(|q| q.name.clone()).collect::<Vec<_>>();
                     rsx! {
                         div { class: "overflow-auto max-h-96 mt-3",
-                            table { class: "table table-zebra table-sm",
+                            table { class: "table table-zebra table-sm table-pin-rows",
                                 thead {
                                     tr {
                                         th { "id" }
@@ -78,10 +79,26 @@ pub fn MatrixTable(
                                     }
                                 }
                                 tbody {
-                                    for row in table_rows().iter() {
+                                    for (i, row) in table_rows().iter().enumerate() {
                                         tr {
-                                            td { class: "font-mono", "{row.student_id}" }
-                                            td { "{row.student_name}" }
+                                            id: "matrix-row-{i}",
+                                            class: if i == cur_student_idx() { "bg-primary/15!" },
+                                            td {
+                                                button {
+                                                    class: "link link-hover font-mono",
+                                                    title: "この受験者を採点する",
+                                                    onclick: move |_| cur_student_idx.set(i),
+                                                    "{row.student_id}"
+                                                }
+                                            }
+                                            td {
+                                                button {
+                                                    class: "link link-hover text-left",
+                                                    title: "この受験者を採点する",
+                                                    onclick: move |_| cur_student_idx.set(i),
+                                                    "{row.student_name}"
+                                                }
+                                            }
                                             for sc in row.scores.iter() {
                                                 td { class: "font-mono", "{sc}" }
                                             }
