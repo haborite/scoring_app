@@ -53,7 +53,7 @@ pub fn MasterQuestionsPage(
                                 qs.push(Question {
                                     id: next_id,
                                     name: format!("問{next_id}"),
-                                    full_score: 10,
+                                    full_score: 5,
                                     weight: 1.0,
                                     comment: String::new(),
                                 });
