@@ -1,0 +1,105 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # Keep in sync with the dioxus version in Cargo.lock
+  DX_VERSION: 0.7.3
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            package-types: --package-types msi --package-types nsis
+          - name: linux-x64
+            os: ubuntu-22.04
+            package-types: --package-types deb --package-types appimage
+          - name: macos-arm64
+            os: macos-latest
+            package-types: --package-types macos --package-types dmg
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev libxdo-dev librsvg2-dev libfuse2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build Tailwind CSS
+        run: |
+          npm ci
+          npm run css
+
+      - name: Test
+        if: runner.os == 'Linux'
+        run: cargo test --locked
+
+      - uses: cargo-bins/cargo-binstall@main
+
+      - name: Install Dioxus CLI
+        run: cargo binstall dioxus-cli@${{ env.DX_VERSION }} --no-confirm --force
+
+      - name: Bundle
+        run: dx bundle --desktop --release ${{ matrix.package-types }} --out-dir dist
+
+      - name: Create portable zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path target/dx/grading_app/release/windows/app/* -DestinationPath dist/GradingApp_${{ matrix.name }}_portable.zip
+
+      - name: Compress .app (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd dist
+          for app in *.app; do
+            ditto -c -k --keepParent "$app" "${app%.app}_${{ matrix.name }}.app.zip"
+            rm -rf "$app"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GradingApp-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

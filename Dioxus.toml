@@ -1,0 +1,10 @@
+[application]
+name = "grading_app"
+
+[bundle]
+identifier = "io.github.haborite.scoring-app"
+publisher = "haborite"
+short_description = "Desktop app for exam grading and rating"
+long_description = "A keyboard-driven desktop app to register questions and examinees, enter scores quickly, and aggregate final grades."
+copyright = "Copyright (c) 2026 haborite"
+category = "Education"
