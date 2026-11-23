@@ -6,10 +6,12 @@ mod ui;
 mod models;
 mod csv_import;
 mod shortcuts;
+mod settings;
 
-use ui::{MasterQuestionsPage, MasterStudentsPage, GradingPage, RatingPage, use_grading_state, TopBar};
+use ui::{MasterQuestionsPage, MasterStudentsPage, GradingPage, RatingPage, SettingsPage, use_grading_state, TopBar};
 use models::{Config, Page, Status};
-use shortcuts::Shortcut;
+use settings::{RECORDING, SETTINGS};
+use shortcuts::{Action, KeyMsg};
 
 fn main() {
     let window = tao::window::WindowBuilder::new()
@@ -28,34 +30,47 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    let mut page = use_signal(|| Page::Grading);
+    let page = use_signal(|| Page::Grading);
     let mut config = use_signal(|| Config::new());
-    let status = use_signal(Status::default);
+    let mut status = use_signal(Status::default);
     // Lives here so the current student survives page switches
     let grading = use_grading_state();
+
+    // App settings: read once, written back whenever they change
+    use_effect(move || {
+        if let Some(e) = settings::take_load_error() {
+            status.set(Status::error(e));
+        }
+    });
+    use_effect(move || {
+        if let Err(e) = settings::save_if_changed() {
+            status.set(Status::error(e));
+        }
+    });
 
     // Keyboard shortcuts, wherever the focus is
     use_future(move || async move {
         let mut listener = document::eval(&shortcuts::listener_js());
-        while let Ok(combo) = listener.recv::<String>().await {
-            let Some(shortcut) = Shortcut::from_combo(&combo) else {
-                continue;
-            };
-            match shortcut {
-                Shortcut::Save => Config::save(config, status),
-                Shortcut::SaveAs => Config::save_as(config, status),
-                Shortcut::Load => Config::load(config, status),
-                Shortcut::Goto(p) => page.set(p),
-                Shortcut::Search => {
-                    page.set(Page::Grading);
-                    grading.open_search();
-                }
-                Shortcut::PrevStudent if page() == Page::Grading => grading.prev_student(),
-                Shortcut::NextStudent if page() == Page::Grading => {
-                    grading.next_student(config.peek().students.len())
-                }
-                Shortcut::PrevStudent | Shortcut::NextStudent => {}
+        while let Ok(msg) = listener.recv::<String>().await {
+            match KeyMsg::parse(&msg) {
+                Some(KeyMsg::Action(action)) => run_action(action, page, config, status, grading),
+                Some(KeyMsg::Record(combo)) => ui::record_key(&combo),
+                None => {}
             }
+        }
+    });
+    // Bindings and recording mode are pushed to the listener whenever they change
+    use_effect(move || {
+        let js = shortcuts::keymap_js(&SETTINGS.read().keys);
+        let _ = document::eval(&js);
+    });
+    use_effect(move || {
+        let _ = document::eval(&shortcuts::recording_js(RECORDING.read().is_some()));
+    });
+    // Leaving the settings page stops recording
+    use_effect(move || {
+        if page() != Page::Settings && RECORDING.peek().is_some() {
+            *RECORDING.write() = None;
         }
     });
 
@@ -96,13 +111,67 @@ fn App() -> Element {
 
     rsx! {
         document::Stylesheet { href: asset!("assets/tailwind.css") }
-        div { class: "min-h-screen p-2 bg-base-200 text-base-content",
+        // Fits the window: each page scrolls inside its own area
+        div { class: "h-screen flex flex-col gap-2 p-2 overflow-hidden bg-base-200 text-base-content",
             TopBar { config, page, status }
-            match page() {
-                Page::MasterQuestions => rsx! { MasterQuestionsPage { config } },
-                Page::MasterStudents => rsx! { MasterStudentsPage { config } },
-                Page::Grading => rsx! { GradingPage { config, state: grading } },
-                Page::Rating => rsx! { RatingPage { config } },
+            div { class: if page() == Page::Grading { "flex-1 min-h-0" } else { "flex-1 min-h-0 overflow-auto" },
+                match page() {
+                    Page::MasterQuestions => rsx! { MasterQuestionsPage { config } },
+                    Page::MasterStudents => rsx! { MasterStudentsPage { config } },
+                    Page::Grading => rsx! { GradingPage { config, state: grading } },
+                    Page::Rating => rsx! { RatingPage { config } },
+                    Page::Settings => rsx! { SettingsPage { status } },
+                }
+            }
+        }
+    }
+}
+
+fn run_action(
+    action: Action,
+    mut page: Signal<Page>,
+    mut config: Signal<Config>,
+    mut status: Signal<Status>,
+    grading: ui::GradingState,
+) {
+    let on_grading = page() == Page::Grading;
+    let qlen = config.peek().questions.len();
+    match action {
+        Action::Save => Config::save(config, status),
+        Action::SaveAs => Config::save_as(config, status),
+        Action::Load => Config::load(config, status),
+        Action::GotoQuestions => page.set(Page::MasterQuestions),
+        Action::GotoStudents => page.set(Page::MasterStudents),
+        Action::GotoGrading => page.set(Page::Grading),
+        Action::GotoRating => page.set(Page::Rating),
+        Action::GotoSettings => page.set(Page::Settings),
+        Action::Search | Action::FieldSearch => {
+            page.set(Page::Grading);
+            grading.open_search();
+        }
+        Action::NextRegrade => {
+            page.set(Page::Grading);
+            let from = *grading.cur_student_idx.peek();
+            match config.peek().next_regrade(from) {
+                Some((s, q)) => grading.goto(s, q),
+                None => status.set(Status::info("要再採点の受験者はいません")),
+            }
+        }
+        _ if !on_grading => {}
+        Action::PrevStudent | Action::FieldPrevStudent => grading.prev_student(),
+        Action::NextStudent | Action::FieldNextStudent => {
+            grading.next_student(config.peek().students.len())
+        }
+        Action::ToggleSection => grading.toggle_section(),
+        Action::NextQuestion => grading.move_question(1, qlen),
+        Action::PrevQuestion => grading.move_question(-1, qlen),
+        Action::ConfirmScore => {
+            let cfg = config.peek();
+            let sid = cfg.students.get(*grading.cur_student_idx.peek()).map(|s| s.id.clone());
+            let qid = cfg.questions.get(*grading.focus_idx.peek()).map(|q| q.id);
+            drop(cfg);
+            if let (Some(sid), Some(qid)) = (sid, qid) {
+                config.write().confirm_score(&sid, qid);
             }
         }
     }

@@ -1,5 +1,5 @@
 use serde::{Serialize, Deserialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::fs;
@@ -8,6 +8,14 @@ use dioxus::prelude::*;
 
 // Serialized form of the last saved/loaded config, used to detect unsaved changes
 pub static SAVED_SNAPSHOT: GlobalSignal<String> = Signal::global(|| Config::new().snapshot());
+
+// Bumped whenever the data is replaced from outside the inputs (file load, import).
+// Text inputs are uncontrolled while typing and are re-created when this changes.
+pub static DATA_GEN: GlobalSignal<u64> = Signal::global(|| 0);
+
+pub fn bump_data_gen() {
+    *DATA_GEN.write() += 1;
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Store)]
 #[serde(default)]
@@ -41,7 +49,24 @@ pub struct Score {
     pub student_id: String,
     pub question_id: u32,
     pub score: Option<u32>,
+    // Full score of the question when this score was entered (or confirmed).
+    // None for files written before this was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graded_full_score: Option<u32>,
 }
+
+impl Score {
+    // Whether this score has to be looked at again against the question's current full score
+    pub fn needs_regrade(&self, full_score: u32) -> bool {
+        let Some(scv) = self.score else {
+            return false;
+        };
+        self.graded_full_score.is_some_and(|g| g != full_score) || scv > full_score
+    }
+}
+
+// Scores that have to be looked at again: (student_id, question_id) -> full score at grading time
+pub type RegradeMap<'a> = HashMap<(&'a str, u32), Option<u32>>;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Store)]
 pub struct Rating {
@@ -56,7 +81,10 @@ pub struct TableRow {
     pub student_id: String,
     pub student_name: String,
     pub scores: Vec<String>,
+    // Per question: Some(full score at grading time) when the score needs regrading
+    pub regrade: Vec<Option<Option<u32>>>,
     pub final_display: String,
+    pub needs_regrade: bool,
 }
 
 // Message shown in the top bar
@@ -105,6 +133,7 @@ pub enum Page {
     MasterStudents,
     Grading,
     Rating,
+    Settings,
 }
 
 // ----------- implementation --------------
@@ -144,6 +173,84 @@ impl Config {
             weighted_rate_sum += scv as f32 / q.full_score as f32 * q.weight;
         }
         Some((weighted_rate_sum / total_weight * 100.0).round() as u32)
+    }
+
+    // Scores that need regrading: the full score changed since grading, or the score is above it.
+    // Derived every time, so changing the full score back clears the mark by itself.
+    pub fn regrade_map(&self) -> RegradeMap<'_> {
+        let full: HashMap<u32, u32> = self.questions.iter().map(|q| (q.id, q.full_score)).collect();
+        self.scores
+            .iter()
+            .filter(|s| full.get(&s.question_id).is_some_and(|&cur| s.needs_regrade(cur)))
+            .map(|s| ((s.student_id.as_str(), s.question_id), s.graded_full_score))
+            .collect()
+    }
+
+    // Students with at least one score that needs regrading
+    pub fn regrade_students<'a>(regrade: &RegradeMap<'a>) -> HashSet<&'a str> {
+        regrade.keys().map(|(sid, _)| *sid).collect()
+    }
+
+    // Final score used for counting and rating: None while incomplete or needing regrading
+    pub fn countable_final_score(
+        &self,
+        score_map: &HashMap<(&str, u32), Option<u32>>,
+        regrade_students: &HashSet<&str>,
+        student_id: &str,
+    ) -> Option<u32> {
+        if regrade_students.contains(student_id) {
+            return None;
+        }
+        self.final_score(score_map, student_id)
+    }
+
+    // Store a score and remember the full score it was given against
+    pub fn set_score(&mut self, student_id: &str, question_id: u32, score: Option<u32>) {
+        let full = self.questions.iter().find(|q| q.id == question_id).map(|q| q.full_score);
+        let graded_full_score = score.and(full);
+        match self.scores.iter_mut()
+            .find(|sc| sc.question_id == question_id && sc.student_id == student_id)
+        {
+            Some(sc) => {
+                sc.score = score;
+                sc.graded_full_score = graded_full_score;
+            }
+            None => self.scores.push(Score {
+                student_id: student_id.to_string(),
+                question_id,
+                score,
+                graded_full_score,
+            }),
+        }
+    }
+
+    // Keep the score as it is and accept it for the current full score.
+    // false if there is nothing to confirm or the score is above the full score.
+    pub fn confirm_score(&mut self, student_id: &str, question_id: u32) -> bool {
+        let Some(full) = self.questions.iter().find(|q| q.id == question_id).map(|q| q.full_score) else {
+            return false;
+        };
+        match self.scores.iter_mut()
+            .find(|sc| sc.question_id == question_id && sc.student_id == student_id)
+        {
+            Some(sc) if sc.score.is_some_and(|v| v <= full) && sc.graded_full_score != Some(full) => {
+                sc.graded_full_score = Some(full);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    // Next student (after `from`, wrapping around) that needs regrading, with the first such question index
+    pub fn next_regrade(&self, from: usize) -> Option<(usize, usize)> {
+        let regrade = self.regrade_map();
+        let n = self.students.len();
+        (1..=n).map(|k| (from + k) % n).find_map(|i| {
+            let sid = self.students[i].id.as_str();
+            self.questions.iter()
+                .position(|q| regrade.contains_key(&(sid, q.id)))
+                .map(|qi| (i, qi))
+        })
     }
 
     // Change a student id and carry its scores over. Err if the new id is empty or taken.
@@ -341,6 +448,7 @@ impl Config {
                     cfg.save_path = Some(path.to_string_lossy().to_string());
                     cfg.mark_saved();
                     config.set(cfg);
+                    bump_data_gen();
                     status.set(Status::info(format!("読み込みました: {}", display_name(&path))));
                 }
                 Ok(None) => {}
@@ -425,7 +533,7 @@ mod tests {
     }
 
     fn sc(student_id: &str, question_id: u32, score: Option<u32>) -> Score {
-        Score { student_id: student_id.to_string(), question_id, score }
+        Score { student_id: student_id.to_string(), question_id, score, graded_full_score: None }
     }
 
     fn st(id: &str) -> Student {
@@ -491,5 +599,69 @@ mod tests {
         let mut cfg = Config::new();
         cfg.save_path = Some("C:/x.json".to_string());
         assert!(!serde_json::to_string(&cfg).unwrap().contains("save_path"));
+    }
+
+    #[test]
+    fn regrade_follows_full_score_changes_and_reverts() {
+        let mut cfg = Config::new();
+        cfg.questions = vec![q(1, 5, 1.0), q(2, 5, 1.0)];
+        cfg.students = vec![st("A"), st("B")];
+        cfg.set_score("A", 1, Some(4));
+        cfg.set_score("A", 2, Some(5));
+        assert!(cfg.regrade_map().is_empty());
+
+        cfg.questions[0].full_score = 8;
+        {
+            let map = cfg.regrade_map();
+            assert_eq!(map.get(&("A", 1)), Some(&Some(5)));
+            assert_eq!(map.len(), 1);
+            let students = Config::regrade_students(&map);
+            assert_eq!(cfg.countable_final_score(&cfg.score_map(), &students, "A"), None);
+        }
+
+        // Back to the value at grading time: no longer flagged
+        cfg.questions[0].full_score = 5;
+        assert!(cfg.regrade_map().is_empty());
+
+        // Confirming accepts the new full score
+        cfg.questions[0].full_score = 8;
+        assert!(cfg.confirm_score("A", 1));
+        assert!(cfg.regrade_map().is_empty());
+        assert_eq!(cfg.scores[0].graded_full_score, Some(8));
+    }
+
+    #[test]
+    fn regrade_rules_for_unscored_old_and_too_high_scores() {
+        let mut cfg = Config::new();
+        cfg.questions = vec![q(1, 10, 1.0)];
+        // Old file: no grading-time full score, flagged only when the score is too high
+        cfg.scores = vec![sc("A", 1, Some(7)), sc("B", 1, None)];
+        cfg.questions[0].full_score = 6;
+        {
+            let map = cfg.regrade_map();
+            assert!(map.contains_key(&("A", 1)));
+            assert!(!map.contains_key(&("B", 1)));
+        }
+        // A score above the full score cannot be confirmed
+        assert!(!cfg.confirm_score("A", 1));
+        cfg.questions[0].full_score = 7;
+        assert!(cfg.regrade_map().is_empty());
+        // Clearing a score stores no grading-time full score
+        cfg.set_score("A", 1, None);
+        assert_eq!(cfg.scores[0].graded_full_score, None);
+    }
+
+    #[test]
+    fn next_regrade_wraps_around() {
+        let mut cfg = Config::new();
+        cfg.questions = vec![q(1, 5, 1.0), q(2, 5, 1.0)];
+        cfg.students = vec![st("A"), st("B"), st("C")];
+        cfg.set_score("A", 2, Some(3));
+        cfg.set_score("C", 1, Some(3));
+        assert_eq!(cfg.next_regrade(0), None);
+        cfg.questions[1].full_score = 6;
+        cfg.questions[0].full_score = 6;
+        assert_eq!(cfg.next_regrade(0), Some((2, 0)));
+        assert_eq!(cfg.next_regrade(2), Some((0, 1)));
     }
 }

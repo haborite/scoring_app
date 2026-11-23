@@ -3,14 +3,16 @@ use std::time::Duration;
 
 use crate::Page;
 use crate::models::{Config, Status};
-use crate::shortcuts::Shortcut;
+use crate::settings::SETTINGS;
+use crate::shortcuts::Action;
 
-// In workflow order; Ctrl+1..4 follow the same order
-const PAGES: [(Page, &str); 4] = [
-    (Page::MasterQuestions, "問題設定"),
-    (Page::MasterStudents, "受験者設定"),
-    (Page::Grading, "採点"),
-    (Page::Rating, "成績評価"),
+// In workflow order; the default Ctrl+1..5 follow the same order
+const PAGES: [(Page, &str, Action); 5] = [
+    (Page::MasterQuestions, "問題設定", Action::GotoQuestions),
+    (Page::MasterStudents, "受験者設定", Action::GotoStudents),
+    (Page::Grading, "採点", Action::GotoGrading),
+    (Page::Rating, "成績評価", Action::GotoRating),
+    (Page::Settings, "設定", Action::GotoSettings),
 ];
 
 #[component]
@@ -34,16 +36,24 @@ pub fn TopBar(
         });
     });
 
+    let settings = SETTINGS.read();
+    let key = |a: Action| settings.key_label(a);
+    let save_title = format!("上書き保存 ({})", key(Action::Save));
+    let save_as_title = format!("名前を付けて保存 ({})", key(Action::SaveAs));
+    let load_title = format!("開く ({})", key(Action::Load));
+    let tabs: Vec<(Page, &str, String)> = PAGES.iter().map(|&(p, label, a)| (p, label, key(a))).collect();
+    drop(settings);
+
     rsx! {
-        div { class: "navbar bg-base-100 rounded-box shadow mb-2 gap-2 min-h-0",
+        div { class: "navbar bg-base-100 rounded-box shadow gap-2 min-h-0",
 
             div { class: "navbar-start w-auto",
                 div { role: "tablist", class: "tabs tabs-box tabs-sm",
-                    for (p, label) in PAGES {
+                    for (p, label, keys) in tabs {
                         button {
                             role: "tab",
                             class: if page() == p { "tab tab-active" } else { "tab" },
-                            title: "{Shortcut::Goto(p).label()}",
+                            title: "{keys}",
                             onclick: move |_| page.set(p),
                             "{label}"
                         }
@@ -71,19 +81,19 @@ pub fn TopBar(
             div { class: "navbar-end w-auto gap-2",
                 button {
                     class: "btn btn-sm btn-primary",
-                    title: "上書き保存 ({Shortcut::Save.label()})",
+                    title: "{save_title}",
                     onclick: move |_| Config::save(config, status),
                     "Save"
                 }
                 button {
                     class: "btn btn-sm",
-                    title: "名前を付けて保存 ({Shortcut::SaveAs.label()})",
+                    title: "{save_as_title}",
                     onclick: move |_| Config::save_as(config, status),
                     "Save as"
                 }
                 button {
                     class: "btn btn-sm",
-                    title: "開く ({Shortcut::Load.label()})",
+                    title: "{load_title}",
                     onclick: move |_| Config::load(config, status),
                     "Load"
                 }

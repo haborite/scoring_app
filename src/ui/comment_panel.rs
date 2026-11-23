@@ -1,49 +1,63 @@
 use dioxus::prelude::*;
-use crate::models::Config;
+use crate::models::{Config, DATA_GEN};
+use crate::ui::{GradingState, Section};
 
 #[component]
 pub fn CommentPanel(
     config: Signal<Config>,
-    cur_question_id: Option<u32>,
+    state: GradingState,
 ) -> Element {
 
-    let cfg = config();
-
-    let (initial_text, question_name) = cur_question_id
-        .and_then(|id| cfg.questions.iter().find(|q| q.id == id))
-        .map(|q| (q.comment.as_str(), q.name.as_str()))
-        .unwrap_or(("", "（問題未選択）"));
-        
-    let on_change = move |e: FormEvent| {
-        if let Some(id) = cur_question_id {
-            if let Some(q) = config.write().questions.iter_mut().find(|q| q.id == id) {
-                q.comment = e.value();
-            }
-        }
-    };
+    let cfg = config.read();
+    let question = cfg.questions.get((state.focus_idx)()).map(|q| (q.id, q.name.clone(), q.comment.clone()));
+    drop(cfg);
+    let gen = DATA_GEN();
 
     rsx! {
-        div { class: "card bg-base-100 shadow",
-            div { class: "card-body gap-3",
-                div { class: "card-title flex items-center justify-between",
-                    span { {question_name} }
-                }
-
-                {cur_question_id.is_none().then(|| rsx!{
-                    div { class: "text-sm opacity-70",
-                        "点数入力欄にフォーカスすると、その問題のコメントをここで編集できます。"
+        div { class: "card bg-base-100 shadow h-full",
+            div { class: "card-body gap-2 p-4 min-h-0",
+                div { class: "card-title text-base truncate",
+                    match &question {
+                        Some((_, name, _)) => rsx! { "{name} のコメント" },
+                        None => rsx! { "（問題未登録）" },
                     }
-                })}
-
-                textarea {
-                    class: "textarea textarea-bordered w-full h-full font-mono text-sm leading-snug",
-                    placeholder: "各問題に対する採点上の注意点やメモ等を記述",
-                    value: initial_text,
-                    // Per keystroke so that a save (Ctrl+S) always includes it
-                    oninput: on_change,
                 }
-
+                // Re-created per question (and per loaded file) so that typing never has its
+                // text overwritten by a late update from Rust
+                for (id, _, comment) in question.into_iter() {
+                    CommentBox { key: "{gen}-{id}", question_id: id, initial: comment, config, state }
+                }
             }
+        }
+    }
+}
+
+#[component]
+fn CommentBox(
+    question_id: u32,
+    initial: String,
+    config: Signal<Config>,
+    state: GradingState,
+) -> Element {
+    let initial = use_hook(|| initial);
+    let mut section = state.section;
+    rsx! {
+        textarea {
+            id: "comment",
+            class: "textarea textarea-bordered w-full flex-1 min-h-0 resize-none font-mono text-sm leading-snug",
+            placeholder: "各問題に対する採点上の注意点やメモ等を記述",
+            initial_value: initial,
+            // Per keystroke so that a save (Ctrl+S) always includes it
+            oninput: move |e: FormEvent| {
+                if let Some(q) = config.write().questions.iter_mut().find(|q| q.id == question_id) {
+                    q.comment = e.value();
+                }
+            },
+            onfocus: move |_| {
+                if *section.peek() != Section::Comment {
+                    section.set(Section::Comment);
+                }
+            },
         }
     }
 }
