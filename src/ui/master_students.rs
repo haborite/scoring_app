@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::models::{Config, Student};
+use crate::models::{bump_data_gen, Config, Student, DATA_GEN};
 use crate::csv_import::{self, CsvFormat};
 
 #[component]
@@ -37,6 +37,7 @@ pub fn MasterStudentsPage(
                                         Ok(Some((_, cfg))) => {
                                             msg.set(format!("{} 人をインポートしました", cfg.students.len()));
                                             config.write().students = cfg.students;
+                                            bump_data_gen();
                                         }
                                         Ok(None) => {}
                                         Err(e) => msg.set(e),
@@ -94,6 +95,7 @@ pub fn MasterStudentsPage(
                                                 }
                                                 msg.set(m);
                                                 config.write().students = result.students;
+                                                bump_data_gen();
                                             }
                                             Err(e) => msg.set(format!("{}: {e}", handle.file_name())),
                                         }
@@ -165,7 +167,7 @@ pub fn MasterStudentsPage(
                             }
                             tbody {
                                 for (idx, _s) in config.read().students.iter().cloned().enumerate() {
-                                    StudentRow { key: "{idx}", idx, config, msg }
+                                    StudentRow { key: "{DATA_GEN()}-{idx}", idx, config, msg }
                                 }
                             }
                         }
@@ -217,7 +219,8 @@ pub fn StudentRow(
             td {
                 input {
                     class: "input input-bordered input-sm w-full",
-                    value: "{s.name}",
+                    // Not controlled while typing (rows are re-created when the list is replaced)
+                    initial_value: "{s.name}",
                     oninput: move |ev| {
                         let v = ev.value();
                         if let Some(s) = config.write().students.get_mut(idx) { s.name = v; }
@@ -231,6 +234,9 @@ pub fn StudentRow(
                         let mut config_write = config.write();
                         if idx < config_write.students.len() {
                             config_write.students.remove(idx);
+                            drop(config_write);
+                            // Rows below move up: re-create them with their new values
+                            bump_data_gen();
                         }
                     },
                     "Del"

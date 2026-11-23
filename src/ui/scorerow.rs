@@ -1,112 +1,92 @@
 use dioxus::prelude::*;
-use crate::models::{Config, Score};
+use crate::models::Config;
+use crate::ui::{GradingState, Section};
 
 #[component]
 pub fn ScoreRow(
+    student_id: String,
     question_id: u32,
     qidx: usize,
-    qlen: usize,
-    cur_question_id: Signal<Option<u32>>,
-    cur_student_idx: Signal<usize>,
-    focus_idx: Signal<usize>,
-    search_open: Signal<bool>,
+    state: GradingState,
     config: Signal<Config>,
 ) -> Element {
-
-    // Text of an out-of-range entry, kept so the field is not cleared while it is not stored
-    let mut invalid_text = use_signal(|| None::<(String, String)>);
+    let GradingState { mut focus_idx, mut section, .. } = state;
 
     let cfg = config.read();
-    let student_id = cfg.students.get(cur_student_idx()).map(|s| s.id.clone()).unwrap_or_default();
-    let Some(question) = cfg.questions.iter().find(|q| q.id == question_id).cloned() else {
-        return rsx! {};
-    };
-    let student_count = cfg.students.len();
-    let stored = cfg.scores
+    let question = cfg.questions.iter().find(|q| q.id == question_id).cloned();
+    let score = cfg.scores
         .iter()
         .find(|sc| sc.question_id == question_id && sc.student_id == student_id)
-        .and_then(|sc| sc.score)
-        .map(|scv| scv.to_string())
-        // Always pass a string: None would leave the previous student's value in the DOM
-        .unwrap_or_default();
+        .cloned();
     drop(cfg);
-    let value = match &*invalid_text.read() {
-        Some((sid, text)) if *sid == student_id => text.clone(),
-        _ => stored,
+    // The input is not controlled: Rust only gives the value it starts with
+    let initial = use_hook(|| score.as_ref().and_then(|s| s.score).map(|v| v.to_string()).unwrap_or_default());
+    let Some(question) = question else {
+        return rsx! {};
     };
     let full = question.full_score;
+    // (full score at grading time, may be confirmed as it is)
+    let regrade = score.as_ref().filter(|s| s.needs_regrade(full)).map(|s| {
+        (s.graded_full_score, s.score.is_some_and(|v| v <= full))
+    });
 
+    let sid = student_id.clone();
     rsx! {
         label {
-            class: "grid grid-cols-[1fr_auto_auto] md:grid-cols-[8rem_6rem_auto_1fr] gap-2 items-center rounded px-1 focus-within:bg-base-200",
+            class: if regrade.is_some() {
+                "grid grid-cols-[minmax(4rem,8rem)_5rem_auto_1fr] gap-2 items-center rounded px-1 py-0.5 break-inside-avoid bg-warning/20 focus-within:bg-warning/35"
+            } else {
+                "grid grid-cols-[minmax(4rem,8rem)_5rem_auto_1fr] gap-2 items-center rounded px-1 py-0.5 break-inside-avoid focus-within:bg-base-200"
+            },
             div { class: "font-semibold truncate", title: "{question.name}", "{question.name}" }
             input {
                 id: "score-{qidx}",
+                // Lets the key listener apply the score-input bindings here
+                "data-score-input": "true",
                 r#type: "number",
-                value,
+                initial_value: initial,
                 min: 0,
                 max: full,
-                class: "input validator",
+                class: "input input-sm validator text-right tabular-nums",
 
                 oninput: move |e| {
                     if student_id.is_empty() {
                         return;
                     }
                     // Out-of-range values are not stored (the field is shown as invalid)
-                    let text = e.value();
-                    let score = text.trim().parse::<u32>().ok().filter(|n| *n <= full);
-                    let invalid = score.is_none() && !text.trim().is_empty();
-                    invalid_text.set(invalid.then(|| (student_id.clone(), text)));
-                    let mut cfg = config.write();
-                    match cfg.scores.iter_mut()
-                        .find(|sc| sc.question_id == question_id && sc.student_id == student_id)
-                    {
-                        Some(sc) => sc.score = score,
-                        None => cfg.scores.push(Score {
-                            student_id: student_id.clone(),
-                            question_id,
-                            score,
-                        }),
-                    }
-                },
-
-                onkeydown: move |e| {
-                    let next = matches!(e.key(), Key::Enter | Key::ArrowDown) || e.code() == Code::NumpadAdd;
-                    let prev = e.key() == Key::ArrowUp || e.code() == Code::NumpadSubtract;
-                    if next || prev {
-                        e.prevent_default();
-                        let idx = if next { (qidx + 1).min(qlen.saturating_sub(1)) } else { qidx.saturating_sub(1) };
-                        focus_idx.set(idx);
-                        return;
-                    }
-                    match e.code() {
-                        // Numpad-only grading: these keys never produce a valid score anyway
-                        Code::NumpadDivide => {
-                            e.prevent_default();
-                            let idx = cur_student_idx.peek().saturating_sub(1);
-                            cur_student_idx.set(idx);
-                        }
-                        Code::NumpadMultiply => {
-                            e.prevent_default();
-                            let idx = (*cur_student_idx.peek() + 1).min(student_count.saturating_sub(1));
-                            cur_student_idx.set(idx);
-                        }
-                        Code::NumpadDecimal => {
-                            e.prevent_default();
-                            search_open.set(true);
-                        }
-                        _ => {}
-                    }
+                    let score = e.value().trim().parse::<u32>().ok().filter(|n| *n <= full);
+                    config.write().set_score(&student_id, question_id, score);
                 },
                 onfocus: move |_| {
-                    cur_question_id.set(Some(question_id));
+                    if *section.peek() != Section::Scores {
+                        section.set(Section::Scores);
+                    }
                     if *focus_idx.peek() != qidx {
                         focus_idx.set(qidx);
                     }
                 }
             }
-            div { class: "text-sm opacity-60", "/ {full}" }
-            p { class: "validator-hint hidden m-0", "0〜{full} の整数" }
+            div { class: "text-sm opacity-60 tabular-nums", "/ {full}" }
+            div { class: "flex items-center gap-2 min-w-0",
+                if let Some((graded, can_confirm)) = regrade {
+                    span { class: "text-xs text-warning-content truncate",
+                        match graded {
+                            Some(g) if g != full => rsx! { "⚠ 満点 {g}→{full}" },
+                            _ => rsx! { "⚠ 満点超過" },
+                        }
+                    }
+                    button {
+                        class: "btn btn-xs",
+                        disabled: !can_confirm,
+                        title: if can_confirm { "点数を変えずに現在の満点で確定する" } else { "満点を超えているため点数を直してください" },
+                        onclick: move |e| {
+                            e.prevent_default();
+                            config.write().confirm_score(&sid, question_id);
+                        },
+                        "確認済み"
+                    }
+                }
+            }
         }
     }
 }

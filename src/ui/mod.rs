@@ -7,7 +7,7 @@ pub mod topbar;
 pub mod search;
 pub mod matrix_table;
 pub mod comment_panel;
-pub mod individual_panel;
+pub mod settings_page;
 pub mod rating;
 
 pub use grading::*;
@@ -19,5 +19,5 @@ pub use topbar::*;
 pub use search::*;
 pub use matrix_table::*;
 pub use comment_panel::*;
-pub use individual_panel::*;
+pub use settings_page::*;
 pub use rating::*;

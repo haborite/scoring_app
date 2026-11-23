@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
-use crate::models::{Config, Question};
+use crate::models::{bump_data_gen, Config, Question, DATA_GEN};
+use crate::settings::SETTINGS;
 
 #[component]
 pub fn MasterQuestionsPage(
@@ -32,6 +33,7 @@ pub fn MasterQuestionsPage(
                                         Ok(Some((_, cfg))) => {
                                             msg.set(format!("{} 問をインポートしました", cfg.questions.len()));
                                             config.write().questions = cfg.questions;
+                                            bump_data_gen();
                                         }
                                         Ok(None) => {}
                                         Err(e) => msg.set(e),
@@ -53,7 +55,7 @@ pub fn MasterQuestionsPage(
                                 qs.push(Question {
                                     id: next_id,
                                     name: format!("問{next_id}"),
-                                    full_score: 5,
+                                    full_score: SETTINGS.peek().default_full_score,
                                     weight: 1.0,
                                     comment: String::new(),
                                 });
@@ -90,7 +92,7 @@ pub fn MasterQuestionsPage(
                                 tr {
                                     th { class: "w-24", "id" }
                                     th { class: "w-64", "name" }
-                                    th { class: "w-32", "full_score" }
+                                    th { class: "w-32 text-right", "full_score" }
                                     th { class: "w-32", "weight" }
                                     th { "comment" }
                                     th { class: "w-24", "" }
@@ -98,7 +100,7 @@ pub fn MasterQuestionsPage(
                             }
                             tbody {
                                 for (idx, _q) in config.read().questions.iter().cloned().enumerate() {
-                                    QuestionRow { key: "{idx}", idx, config, msg }
+                                    QuestionRow { key: "{DATA_GEN()}-{idx}", idx, config, msg }
                                 }
                             }
                         }
@@ -151,7 +153,8 @@ pub fn QuestionRow(
             td {
                 input {
                     class: "input input-bordered input-sm w-full",
-                    value: "{q.name}",
+                    // Not controlled while typing (rows are re-created when the list is replaced)
+                    initial_value: "{q.name}",
                     oninput: move |ev| {
                         let v = ev.value();
                         if let Some(q) = config.write().questions.get_mut(idx) { q.name = v; }
@@ -160,11 +163,13 @@ pub fn QuestionRow(
             }
             td {
                 input {
-                    class: "input input-bordered input-sm w-28",
+                    class: "input input-bordered input-sm w-28 text-right tabular-nums",
                     r#type: "number",
-                    value: "{q.full_score}",
+                    min: 0,
+                    initial_value: "{q.full_score}",
                     oninput: move |ev| {
-                        let v = ev.value().parse::<u32>().unwrap_or(0);
+                        // An empty or partial entry keeps the last full score (no flicker of regrade marks)
+                        let Ok(v) = ev.value().trim().parse::<u32>() else { return };
                         if let Some(q) = config.write().questions.get_mut(idx) { q.full_score = v; }
                     }
                 }
@@ -174,7 +179,7 @@ pub fn QuestionRow(
                     class: "input input-bordered input-sm w-28",
                     r#type: "number",
                     step: "0.01",
-                    value: "{q.weight}",
+                    initial_value: "{q.weight}",
                     oninput: move |ev| {
                         let v = ev.value().parse::<f32>().unwrap_or(0.0);
                         if let Some(q) = config.write().questions.get_mut(idx) { q.weight = v; }
@@ -184,7 +189,7 @@ pub fn QuestionRow(
             td {
                 input {
                     class: "input input-bordered input-sm w-full",
-                    value: "{q.comment}",
+                    initial_value: "{q.comment}",
                     oninput: move |ev| {
                         let v = ev.value();
                         if let Some(q) = config.write().questions.get_mut(idx) { q.comment = v; }
@@ -198,6 +203,9 @@ pub fn QuestionRow(
                         let mut config_write = config.write();
                         if idx < config_write.questions.len() {
                             config_write.questions.remove(idx);
+                            drop(config_write);
+                            // Rows below move up: re-create them with their new values
+                            bump_data_gen();
                         }
                     },
                     "Del"

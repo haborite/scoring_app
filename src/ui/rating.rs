@@ -10,9 +10,16 @@ pub fn RatingPage(
     let final_scores = {
         let cfg = config.read();
         let score_map = cfg.score_map();
+        let regrade = cfg.regrade_map();
+        let regrade_students = Config::regrade_students(&regrade);
         cfg.students.iter()
-            .filter_map(|s| cfg.final_score(&score_map, &s.id))
+            .filter_map(|s| cfg.countable_final_score(&score_map, &regrade_students, &s.id))
             .collect::<Vec<u32>>()
+    };
+    let regrade_count = {
+        let cfg = config.read();
+        let regrade = cfg.regrade_map();
+        Config::regrade_students(&regrade).len()
     };
     let student_count = config.read().students.len();
 
@@ -28,6 +35,7 @@ pub fn RatingPage(
                     stats: rating_stats,
                     scored: final_scores.len(),
                     student_count,
+                    regrade_count,
                 }
             }
             div { class: "mt-2",
@@ -64,7 +72,7 @@ fn RatingEditorCard(mut config: Signal<Config>) -> Element {
                                 }
 
                                 input {
-                                    class: "input input-sm input-bordered w-24",
+                                    class: "input input-sm input-bordered w-24 text-right tabular-nums",
                                     r#type: "number",
                                     min: "0",
                                     max: "100",
@@ -120,13 +128,19 @@ fn RatingStatsCard(
     stats: Vec<RatingStats>,
     scored: usize,
     student_count: usize,
+    regrade_count: usize,
 ) -> Element {
     rsx! {
         div { class: "card bg-base-100 shadow",
             div { class: "card-body",
                 div { class: "card-title", "人数・割合" }
                 div { class: "text-sm opacity-70",
-                    "集計対象: {scored} / {student_count} 人（未入力のある受験者は除外）"
+                    "集計対象: {scored} / {student_count} 人（未入力・要再採点のある受験者は除外）"
+                }
+                if regrade_count > 0 {
+                    div { class: "alert alert-warning py-1 text-sm",
+                        "⚠ 満点が採点時から変わった受験者が {regrade_count} 人います。採点画面で再採点するまで集計に含まれません。"
+                    }
                 }
 
                 table { class: "table table-sm",
