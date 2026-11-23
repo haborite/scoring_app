@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::models::{bump_data_gen, Config, Student, DATA_GEN};
+use crate::models::{bump_data_gen, Config, Part, Student, DATA_GEN};
 use crate::csv_import::{self, CsvFormat};
 
 #[component]
@@ -29,22 +29,16 @@ pub fn MasterStudentsPage(
 
                     div { class: "flex flex-wrap items-center gap-2",
                         button {
-                            class: "btn btn-sm btn-primary",
-                            onclick: move |_| {
-                                spawn(async move {
-                                    // 通常の Config 形式として読むが students だけ使う
-                                    match Config::pick_file().await {
-                                        Ok(Some((_, cfg))) => {
-                                            msg.set(format!("{} 人をインポートしました", cfg.students.len()));
-                                            config.write().students = cfg.students;
-                                            bump_data_gen();
-                                        }
-                                        Ok(None) => {}
-                                        Err(e) => msg.set(e),
-                                    }
-                                });
-                            },
-                            "Import JSON"
+                            class: "btn btn-sm",
+                            title: "受験者だけを JSON ファイルに保存します",
+                            onclick: move |_| Config::save_part(config, Part::Students, msg),
+                            "保存"
+                        }
+                        button {
+                            class: "btn btn-sm",
+                            title: "保存ファイルから受験者だけを読み込みます（全体の保存ファイルからも読み込めます）",
+                            onclick: move |_| Config::load_part(config, Part::Students, msg),
+                            "読み込み"
                         }
 
                         div { class: "flex items-center gap-1",
@@ -110,7 +104,7 @@ pub fn MasterStudentsPage(
                             onclick: move |_| {
                                 match csv_import::ensure_user_formats_file() {
                                     Ok(path) => {
-                                        open_folder(&path);
+                                        csv_import::open_folder(&path);
                                         msg.set(format!("CSV フォーマットの定義ファイル: {}", path.display()));
                                     }
                                     Err(e) => msg.set(e),
@@ -146,9 +140,9 @@ pub fn MasterStudentsPage(
                     }
 
                     p { class: "text-sm opacity-70",
-                        "Import JSON: 保存ファイルから "
+                        "保存 / 読み込み: 受験者一覧だけを JSON ファイル（"
                         code { "students" }
-                        " だけを取り込みます。Import CSV: 選んだフォーマットで CSV を読み込みます。どちらも受験者一覧を置き換えます（点数は学籍番号で対応付けられるため保持されます）。"
+                        " だけを含む、全体の保存ファイルと同じ形式）でやり取りします。Import CSV: 選んだフォーマットで CSV を読み込みます。どちらも受験者一覧を置き換えます（点数は学籍番号で対応付けられるため保持されます）。"
                     }
                 }
             }
@@ -262,18 +256,6 @@ fn reload_csv_formats(mut formats: Signal<Vec<CsvFormat>>, mut msg: Signal<Strin
     if *formats.peek() != loaded {
         formats.set(loaded);
     }
-}
-
-// Show the file in the OS file manager
-fn open_folder(path: &std::path::Path) {
-    let dir = path.parent().unwrap_or(path);
-    #[cfg(target_os = "windows")]
-    let cmd = std::process::Command::new("explorer").arg(dir).spawn();
-    #[cfg(target_os = "macos")]
-    let cmd = std::process::Command::new("open").arg(dir).spawn();
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let cmd = std::process::Command::new("xdg-open").arg(dir).spawn();
-    let _ = cmd;
 }
 
 #[cfg(test)]
