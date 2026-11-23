@@ -1,7 +1,7 @@
 // Import of students from CSV files described by a user-definable `CsvFormat`.
 //
 // Formats come from two places:
-// - built-in formats (UTAS)
+// - built-in formats (UTAS, UTOL assignments)
 // - `csv_formats.json` in the app config directory, a JSON array of `CsvFormat`
 //   that users edit by hand. A user format with the same name as a built-in one replaces it.
 
@@ -86,6 +86,12 @@ pub fn builtin_formats() -> Vec<CsvFormat> {
         description: "UTAS の履修者名簿（4 行目が見出し行）".to_string(),
         skip_before_header: 3,
         id_header: "学生証番号".to_string(),
+        name_header: "氏名".to_string(),
+        ..CsvFormat::default()
+    }, CsvFormat {
+        name: "UTOL 課題".to_string(),
+        description: "UTOL の課題提出状況 CSV（1 行目が見出し行）".to_string(),
+        id_header: "[#]学生証番号".to_string(),
         name_header: "氏名".to_string(),
         ..CsvFormat::default()
     }]
@@ -295,7 +301,22 @@ mod tests {
             ("09999999", "山田　花子"),
             ("01234567", "佐藤　次郎"),
             ("J2233445", "田中　葉子"),
-            ("J2233446", "高橋　三郎"),
+        ]);
+        // The last row repeats J2233445: skipped, with its line number in the warning
+        assert_eq!(r.warnings, vec![
+            "8行目: 学生証番号 J2233445（高橋　三郎）は重複しているため読み飛ばしました".to_string(),
+        ]);
+    }
+
+    #[test]
+    fn utol_example_file() {
+        let utol = builtin_formats().into_iter().find(|f| f.name == "UTOL 課題").unwrap();
+        let bytes = include_bytes!("../reference_files/utol_example_1.csv");
+        let r = utol.parse(bytes).unwrap();
+        assert_eq!(ids(&r), vec![
+            ("01122334", "鈴木 一郎"),
+            ("01122335", "山田 花子"),
+            ("01122336", "田中 次郎"),
         ]);
         assert!(r.warnings.is_empty(), "{:?}", r.warnings);
     }
