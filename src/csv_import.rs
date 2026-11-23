@@ -5,9 +5,9 @@
 // - `csv_formats.json` in the app config directory, a JSON array of `CsvFormat`
 //   that users edit by hand. A user format with the same name as a built-in one replaces it.
 
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::models::Student;
 
@@ -103,56 +103,79 @@ pub fn user_formats_path() -> Option<PathBuf> {
 
 // Built-in formats followed by user formats. Problems with the user file are returned as messages.
 pub fn load_formats() -> (Vec<CsvFormat>, Vec<String>) {
-    let mut formats = builtin_formats();
+    load_with_user_file(builtin_formats(), user_formats_path(), |f| f.name.clone(), CsvFormat::validate)
+}
+
+// Built-in entries followed by the entries of a user JSON file (an array). A user entry with the
+// same name replaces the built-in one; invalid entries are skipped and reported.
+pub fn load_with_user_file<T: DeserializeOwned>(
+    builtins: Vec<T>,
+    path: Option<PathBuf>,
+    name_of: fn(&T) -> String,
+    validate: fn(&T) -> Result<(), String>,
+) -> (Vec<T>, Vec<String>) {
+    let mut items = builtins;
     let mut errors = Vec::new();
-
-    let Some(path) = user_formats_path() else {
-        return (formats, errors);
+    let Some(path) = path.filter(|p| p.exists()) else {
+        return (items, errors);
     };
-    if !path.exists() {
-        return (formats, errors);
-    }
-
-    let user: Vec<CsvFormat> = match std::fs::read_to_string(&path)
+    let user: Vec<T> = match std::fs::read_to_string(&path)
         .map_err(|e| e.to_string())
         .and_then(|txt| serde_json::from_str(txt.trim_start_matches('\u{feff}')).map_err(|e| e.to_string()))
     {
         Ok(v) => v,
         Err(e) => {
             errors.push(format!("{} を読み込めませんでした: {e}", path.display()));
-            return (formats, errors);
+            return (items, errors);
         }
     };
-
-    for f in user {
-        if let Err(e) = f.validate() {
-            errors.push(format!("CSV フォーマット「{}」を無視しました: {e}", f.name));
+    for item in user {
+        let name = name_of(&item);
+        if let Err(e) = validate(&item) {
+            errors.push(format!("CSV フォーマット「{name}」を無視しました: {e}"));
             continue;
         }
-        match formats.iter_mut().find(|b| b.name == f.name) {
-            Some(existing) => *existing = f,
-            None => formats.push(f),
+        match items.iter_mut().find(|b| name_of(b) == name) {
+            Some(existing) => *existing = item,
+            None => items.push(item),
         }
     }
-    (formats, errors)
+    (items, errors)
 }
 
-// Create the user format file with an example entry if it does not exist. Returns its path.
-pub fn ensure_user_formats_file() -> Result<PathBuf, String> {
-    let path = user_formats_path().ok_or("設定フォルダが見つかりません")?;
+// Create a user format file with example entries if it does not exist. Returns its path.
+pub fn ensure_user_file<T: Serialize>(path: Option<PathBuf>, examples: &[T]) -> Result<PathBuf, String> {
+    let path = path.ok_or("設定フォルダが見つかりません")?;
     if !path.exists() {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
-        let example = CsvFormat {
-            name: "カスタム形式の例".to_string(),
-            description: "UTAS 形式を元にした例。自由に編集・追加してください".to_string(),
-            ..builtin_formats().remove(0)
-        };
-        let json = serde_json::to_string_pretty(&vec![example]).map_err(|e| e.to_string())?;
+        let json = serde_json::to_string_pretty(examples).map_err(|e| e.to_string())?;
         std::fs::write(&path, json).map_err(|e| e.to_string())?;
     }
     Ok(path)
+}
+
+// Show the folder of a file in the OS file manager
+pub fn open_folder(path: &Path) {
+    let dir = path.parent().unwrap_or(path);
+    #[cfg(target_os = "windows")]
+    let cmd = std::process::Command::new("explorer").arg(dir).spawn();
+    #[cfg(target_os = "macos")]
+    let cmd = std::process::Command::new("open").arg(dir).spawn();
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let cmd = std::process::Command::new("xdg-open").arg(dir).spawn();
+    let _ = cmd;
+}
+
+// Create the user format file with an example entry if it does not exist. Returns its path.
+pub fn ensure_user_formats_file() -> Result<PathBuf, String> {
+    let example = CsvFormat {
+        name: "カスタム形式の例".to_string(),
+        description: "UTAS 形式を元にした例。自由に編集・追加してください".to_string(),
+        ..builtin_formats().remove(0)
+    };
+    ensure_user_file(user_formats_path(), &[example])
 }
 
 impl CsvFormat {
@@ -172,12 +195,9 @@ impl CsvFormat {
         Ok(())
     }
 
-    pub fn parse(&self, bytes: &[u8]) -> Result<CsvImport, String> {
-        self.validate()?;
-        let text = decode(bytes, self.encoding)?;
-
-        // (line number in the file, cells)
-        let mut lines: Vec<(u64, Vec<String>)> = Vec::new();
+    // Records of the text with where they are, cells not trimmed
+    pub fn read_records(&self, text: &str) -> Result<Vec<RawRecord>, String> {
+        let mut records = Vec::new();
         let mut reader = csv::ReaderBuilder::new()
             .has_headers(false)
             .flexible(true)
@@ -195,16 +215,34 @@ impl CsvFormat {
             if !has_record {
                 break;
             }
-            let start = offset + text.as_bytes()[offset..].iter()
+            let bytes = text.as_bytes();
+            let start = offset + bytes[offset..].iter()
                 .take_while(|b| matches!(b, b'\r' | b'\n'))
                 .count();
-            let line = 1 + text.as_bytes()[..start].iter().filter(|&&b| b == b'\n').count() as u64;
+            let line = 1 + bytes[..start].iter().filter(|&&b| b == b'\n').count() as u64;
             offset = (reader.position().byte() as usize).min(text.len());
-            let cells = record.iter()
-                .map(|c| if self.trim_whitespace { c.trim().to_string() } else { c.to_string() })
-                .collect();
-            lines.push((line, cells));
+            let end = start.max(offset - bytes[start..offset].iter().rev()
+                .take_while(|b| matches!(b, b'\r' | b'\n'))
+                .count());
+            let cells = record.iter().map(str::to_string).collect();
+            records.push(RawRecord { line, start, end, cells });
         }
+        Ok(records)
+    }
+
+    pub fn clean_cell(&self, c: &str) -> String {
+        if self.trim_whitespace { c.trim().to_string() } else { c.to_string() }
+    }
+
+    pub fn parse(&self, bytes: &[u8]) -> Result<CsvImport, String> {
+        self.validate()?;
+        let text = decode(bytes, self.encoding)?;
+
+        // (line number in the file, cells)
+        let lines: Vec<(u64, Vec<String>)> = self.read_records(&text)?
+            .into_iter()
+            .map(|r| (r.line, r.cells.iter().map(|c| self.clean_cell(c)).collect()))
+            .collect();
 
         // For columns, transpose so that the rest works the same way. Labels become column numbers.
         let (lines, unit) = match self.direction {
@@ -251,22 +289,63 @@ impl CsvFormat {
 }
 
 fn decode(bytes: &[u8], encoding: CsvEncoding) -> Result<String, String> {
+    decode_detect(bytes, encoding).map(|(s, _)| s)
+}
+
+// A record and the byte range of its text (without the line break)
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawRecord {
+    pub line: u64,
+    pub start: usize,
+    pub end: usize,
+    pub cells: Vec<String>,
+}
+
+// How a file was actually encoded, so that it can be written back the same way
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Detected {
+    Utf8 { bom: bool },
+    ShiftJis,
+}
+
+pub fn decode_detect(bytes: &[u8], encoding: CsvEncoding) -> Result<(String, Detected), String> {
     let utf8 = |b: &[u8]| {
-        let b = b.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(b);
-        String::from_utf8(b.to_vec()).map_err(|_| "UTF-8 として読めませんでした".to_string())
+        let stripped = b.strip_prefix(b"\xEF\xBB\xBF");
+        let bom = stripped.is_some();
+        String::from_utf8(stripped.unwrap_or(b).to_vec())
+            .map(|s| (s, Detected::Utf8 { bom }))
+            .map_err(|_| "UTF-8 として読めませんでした".to_string())
     };
     let sjis = |b: &[u8]| {
         let (s, _, had_errors) = encoding_rs::SHIFT_JIS.decode(b);
         if had_errors {
             Err("Shift_JIS として読めませんでした".to_string())
         } else {
-            Ok(s.into_owned())
+            Ok((s.into_owned(), Detected::ShiftJis))
         }
     };
     match encoding {
         CsvEncoding::Utf8 => utf8(bytes),
         CsvEncoding::ShiftJis => sjis(bytes),
         CsvEncoding::Auto => utf8(bytes).or_else(|_| sjis(bytes)),
+    }
+}
+
+pub fn encode(text: &str, encoding: Detected) -> Result<Vec<u8>, String> {
+    match encoding {
+        Detected::Utf8 { bom } => {
+            let mut out = if bom { b"\xEF\xBB\xBF".to_vec() } else { Vec::new() };
+            out.extend_from_slice(text.as_bytes());
+            Ok(out)
+        }
+        Detected::ShiftJis => {
+            let (b, _, had_errors) = encoding_rs::SHIFT_JIS.encode(text);
+            if had_errors {
+                Err("Shift_JIS で表せない文字が含まれています".to_string())
+            } else {
+                Ok(b.into_owned())
+            }
+        }
     }
 }
 
@@ -319,6 +398,28 @@ mod tests {
             ("01122336", "田中 次郎"),
         ]);
         assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+    }
+
+    #[test]
+    fn records_know_their_byte_ranges() {
+        let f = CsvFormat { name: "t".into(), id_header: "id".into(), name_header: "n".into(), ..CsvFormat::default() };
+        let text = "a,b\r\n\r\n\"x,1\",y\r\nlast";
+        let recs = f.read_records(text).unwrap();
+        let spans: Vec<(&str, u64)> = recs.iter().map(|r| (&text[r.start..r.end], r.line)).collect();
+        assert_eq!(spans, vec![("a,b", 1), ("\"x,1\",y", 3), ("last", 4)]);
+        assert_eq!(recs[1].cells, vec!["x,1", "y"]);
+    }
+
+    #[test]
+    fn decode_and_encode_keep_the_encoding() {
+        let bom = b"\xEF\xBB\xBFa,b";
+        let (t, d) = decode_detect(bom, CsvEncoding::Auto).unwrap();
+        assert_eq!((t.as_str(), d), ("a,b", Detected::Utf8 { bom: true }));
+        assert_eq!(encode(&t, d).unwrap(), bom.to_vec());
+        let (sjis, _, _) = encoding_rs::SHIFT_JIS.encode("評語");
+        let (t, d) = decode_detect(&sjis, CsvEncoding::Auto).unwrap();
+        assert_eq!(d, Detected::ShiftJis);
+        assert_eq!(encode(&t, d).unwrap(), sjis.to_vec());
     }
 
     #[test]

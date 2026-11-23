@@ -14,6 +14,28 @@ pub struct Settings {
     pub default_full_score: u32,
     pub layout: Layout,
     pub keys: KeyOverrides,
+    pub histogram: HistogramView,
+}
+
+// Display options of the histogram on the rating page
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct HistogramView {
+    // Width of a class in points (1, 2, 5 or 10)
+    pub bin_width: u32,
+    pub color_by_rating: bool,
+    pub show_thresholds: bool,
+    pub show_counts: bool,
+}
+
+impl HistogramView {
+    pub const WIDTHS: [u32; 4] = [1, 2, 5, 10];
+}
+
+impl Default for HistogramView {
+    fn default() -> Self {
+        HistogramView { bin_width: 5, color_by_rating: true, show_thresholds: true, show_counts: true }
+    }
 }
 
 // Pane sizes of the grading page, in percent of the page
@@ -43,6 +65,7 @@ impl Default for Settings {
             default_full_score: 8,
             layout: Layout::default(),
             keys: KeyOverrides::new(),
+            histogram: HistogramView::default(),
         }
     }
 }

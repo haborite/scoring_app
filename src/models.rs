@@ -72,6 +72,44 @@ pub type RegradeMap<'a> = HashMap<(&'a str, u32), Option<u32>>;
 pub struct Rating {
     pub label: String,
     pub min_score: u32,
+    // Guideline upper limit of the share of this rating, in percent. Exceeding it is only warned about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_ratio: Option<f32>,
+}
+
+// One of the lists that can be saved to / loaded from its own file
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Part {
+    Questions,
+    Students,
+    Ratings,
+}
+
+impl Part {
+    // Key in the (common) JSON format
+    pub fn key(self) -> &'static str {
+        match self {
+            Part::Questions => "questions",
+            Part::Students => "students",
+            Part::Ratings => "ratings",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Part::Questions => "問題",
+            Part::Students => "受験者",
+            Part::Ratings => "成績区分",
+        }
+    }
+
+    fn len(self, cfg: &Config) -> usize {
+        match self {
+            Part::Questions => cfg.questions.len(),
+            Part::Students => cfg.students.len(),
+            Part::Ratings => cfg.ratings.len(),
+        }
+    }
 }
 
 // ----------- for UI display -----------
@@ -191,19 +229,6 @@ impl Config {
         regrade.keys().map(|(sid, _)| *sid).collect()
     }
 
-    // Final score used for counting and rating: None while incomplete or needing regrading
-    pub fn countable_final_score(
-        &self,
-        score_map: &HashMap<(&str, u32), Option<u32>>,
-        regrade_students: &HashSet<&str>,
-        student_id: &str,
-    ) -> Option<u32> {
-        if regrade_students.contains(student_id) {
-            return None;
-        }
-        self.final_score(score_map, student_id)
-    }
-
     // Store a score and remember the full score it was given against
     pub fn set_score(&mut self, student_id: &str, question_id: u32, score: Option<u32>) {
         let full = self.questions.iter().find(|q| q.id == question_id).map(|q| q.full_score);
@@ -297,6 +322,144 @@ impl Config {
         }
         self.questions[idx].id = new_id;
         Ok(())
+    }
+
+    // JSON holding only one part, in the common format: {"questions": [...]}
+    pub fn part_json(&self, part: Part) -> Result<String> {
+        let value = match part {
+            Part::Questions => serde_json::to_value(&self.questions),
+            Part::Students => serde_json::to_value(&self.students),
+            Part::Ratings => serde_json::to_value(&self.ratings),
+        }?;
+        let mut map = serde_json::Map::new();
+        map.insert(part.key().to_string(), value);
+        Ok(serde_json::to_string_pretty(&serde_json::Value::Object(map))?)
+    }
+
+    // Read one part from a file in the common format (a whole saved file is fine too).
+    // Err if the file does not contain that part, so that nothing is replaced by mistake.
+    pub fn parse_part(txt: &str, part: Part) -> std::result::Result<Config, String> {
+        let txt = txt.trim_start_matches('\u{feff}');
+        let value: serde_json::Value = serde_json::from_str(txt).map_err(|e| format_json_error(txt, e))?;
+        if value.get(part.key()).is_none() {
+            return Err(format!("このファイルには {}（{}）が含まれていません", part.label(), part.key()));
+        }
+        serde_json::from_value::<Config>(value).map_err(|e| format!("{}（{}）を読み込めませんでした: {e}", part.label(), part.key()))
+    }
+
+    // Replace one part with the one in `from`
+    pub fn replace_part(&mut self, from: Config, part: Part) {
+        match part {
+            Part::Questions => self.questions = from.questions,
+            Part::Students => self.students = from.students,
+            Part::Ratings => {
+                self.ratings = from.ratings;
+                self.ratings.sort_by(|a, b| b.min_score.cmp(&a.min_score));
+            }
+        }
+    }
+
+    // Entered scores that would no longer belong to any question/student after replacing a part
+    pub fn scores_lost_by(&self, from: &Config, part: Part) -> usize {
+        let entered = self.scores.iter().filter(|s| s.score.is_some());
+        match part {
+            Part::Questions => {
+                let ids: HashSet<u32> = from.questions.iter().map(|q| q.id).collect();
+                let current: HashSet<u32> = self.questions.iter().map(|q| q.id).collect();
+                entered.filter(|s| current.contains(&s.question_id) && !ids.contains(&s.question_id)).count()
+            }
+            Part::Students => {
+                let ids: HashSet<&str> = from.students.iter().map(|s| s.id.as_str()).collect();
+                let current: HashSet<&str> = self.students.iter().map(|s| s.id.as_str()).collect();
+                entered.filter(|s| current.contains(s.student_id.as_str()) && !ids.contains(s.student_id.as_str())).count()
+            }
+            Part::Ratings => 0,
+        }
+    }
+
+    // Save one part to a file chosen by the user. The result is reported through `msg`.
+    pub fn save_part(config: Signal<Config>, part: Part, mut msg: Signal<String>) {
+        let Some(guard) = DialogGuard::acquire() else {
+            return;
+        };
+        spawn(async move {
+            let handle = rfd::AsyncFileDialog::new()
+                .add_filter("JSON", &["json"])
+                .set_file_name(format!("{}.json", part.key()))
+                .save_file()
+                .await;
+            drop(guard);
+            let Some(handle) = handle else {
+                return;
+            };
+            let path = handle.path().to_path_buf();
+            let result = match config.peek().part_json(part) {
+                Ok(json) => fs::write(&path, json).await.map_err(anyhow::Error::from),
+                Err(e) => Err(e),
+            };
+            match result {
+                Ok(()) => msg.set(format!(
+                    "{}（{} 件）を保存しました: {}",
+                    part.label(),
+                    part.len(&config.peek()),
+                    display_name(&path)
+                )),
+                Err(e) => msg.set(format!("保存に失敗しました: {e:#}")),
+            }
+        });
+    }
+
+    // Replace one part with the one in a file chosen by the user, after confirming
+    pub fn load_part(mut config: Signal<Config>, part: Part, mut msg: Signal<String>) {
+        spawn(async move {
+            let (path, txt) = match Config::pick_text().await {
+                Ok(Some(v)) => v,
+                Ok(None) => return,
+                Err(e) => {
+                    msg.set(e);
+                    return;
+                }
+            };
+            let from = match Config::parse_part(&txt, part) {
+                Ok(c) => c,
+                Err(e) => {
+                    msg.set(format!("{}: {e}", display_name(&path)));
+                    return;
+                }
+            };
+            let current = part.len(&config.peek());
+            if current > 0 {
+                let lost = config.peek().scores_lost_by(&from, part);
+                let mut text = format!(
+                    "今の{} {} 件を、{} の {} 件で置き換えます。",
+                    part.label(),
+                    current,
+                    display_name(&path),
+                    part.len(&from),
+                );
+                if lost > 0 {
+                    text.push_str(&format!(
+                        "\n\n入力済みの点数のうち {lost} 件は、対応する{}がなくなるため表示されなくなります（{}を元に戻せば再び表示されます）。",
+                        part.label(),
+                        part.label(),
+                    ));
+                }
+                let answer = rfd::AsyncMessageDialog::new()
+                    .set_level(if lost > 0 { rfd::MessageLevel::Warning } else { rfd::MessageLevel::Info })
+                    .set_title("Scoring App")
+                    .set_description(text)
+                    .set_buttons(rfd::MessageButtons::OkCancel)
+                    .show()
+                    .await;
+                if answer != rfd::MessageDialogResult::Ok {
+                    return;
+                }
+            }
+            let count = part.len(&from);
+            config.write().replace_part(from, part);
+            bump_data_gen();
+            msg.set(format!("{}を {} 件読み込みました: {}", part.label(), count, display_name(&path)));
+        });
     }
 
     // Create blunk config
@@ -459,6 +622,16 @@ impl Config {
 
     // Open filedialog and parse the selected file. Ok(None) if canceled.
     pub async fn pick_file() -> std::result::Result<Option<(PathBuf, Config)>, String> {
+        let Some((path, txt)) = Config::pick_text().await? else {
+            return Ok(None);
+        };
+        serde_json::from_str::<Config>(&txt)
+            .map(|cfg| Some((path, cfg)))
+            .map_err(|e| format_json_error(&txt, e))
+    }
+
+    // Open filedialog and read the selected JSON file as text. Ok(None) if canceled.
+    async fn pick_text() -> std::result::Result<Option<(PathBuf, String)>, String> {
         let Some(guard) = DialogGuard::acquire() else {
             return Ok(None);
         };
@@ -479,10 +652,7 @@ impl Config {
         if txt.trim().is_empty() {
             return Err("Empty file.".to_string());
         }
-
-        serde_json::from_str::<Config>(&txt)
-            .map(|cfg| Some((path, cfg)))
-            .map_err(|e| format_json_error(&txt, e))
+        Ok(Some((path, txt)))
     }
 
 }
@@ -616,7 +786,7 @@ mod tests {
             assert_eq!(map.get(&("A", 1)), Some(&Some(5)));
             assert_eq!(map.len(), 1);
             let students = Config::regrade_students(&map);
-            assert_eq!(cfg.countable_final_score(&cfg.score_map(), &students, "A"), None);
+            assert!(students.contains("A"));
         }
 
         // Back to the value at grading time: no longer flagged
@@ -663,5 +833,47 @@ mod tests {
         cfg.questions[0].full_score = 6;
         assert_eq!(cfg.next_regrade(0), Some((2, 0)));
         assert_eq!(cfg.next_regrade(2), Some((0, 1)));
+    }
+
+    #[test]
+    fn part_round_trip_and_missing_part() {
+        let mut cfg = Config::new();
+        cfg.questions = vec![q(1, 10, 1.0)];
+        cfg.students = vec![st("A")];
+        cfg.scores = vec![sc("A", 1, Some(3))];
+        cfg.ratings = vec![Rating { label: "可".into(), min_score: 60, max_ratio: None }];
+
+        let json = cfg.part_json(Part::Ratings).unwrap();
+        assert!(json.contains("ratings") && !json.contains("questions") && !json.contains("students"));
+        let back = Config::parse_part(&json, Part::Ratings).unwrap();
+        assert_eq!(back.ratings, cfg.ratings);
+
+        // A ratings-only file must not empty the question list
+        assert!(Config::parse_part(&json, Part::Questions).unwrap_err().contains("questions"));
+        // A whole saved file works for any part
+        let whole = serde_json::to_string(&cfg).unwrap();
+        assert_eq!(Config::parse_part(&whole, Part::Students).unwrap().students, cfg.students);
+    }
+
+    #[test]
+    fn replacing_parts_reports_lost_scores() {
+        let mut cfg = Config::new();
+        cfg.questions = vec![q(1, 10, 1.0), q(2, 10, 1.0)];
+        cfg.students = vec![st("A"), st("B")];
+        cfg.scores = vec![sc("A", 1, Some(3)), sc("A", 2, Some(4)), sc("B", 2, None)];
+
+        let mut from = Config::new();
+        from.questions = vec![q(1, 5, 1.0)];
+        assert_eq!(cfg.scores_lost_by(&from, Part::Questions), 1);
+        from.students = vec![st("B")];
+        assert_eq!(cfg.scores_lost_by(&from, Part::Students), 2);
+
+        from.ratings = vec![
+            Rating { label: "可".into(), min_score: 60, max_ratio: None },
+            Rating { label: "優".into(), min_score: 80, max_ratio: Some(30.0) },
+        ];
+        cfg.replace_part(from, Part::Ratings);
+        assert_eq!(cfg.ratings[0].label, "優");
+        assert_eq!(cfg.questions.len(), 2);
     }
 }

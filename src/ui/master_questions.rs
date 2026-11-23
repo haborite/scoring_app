@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::models::{bump_data_gen, Config, Question, DATA_GEN};
+use crate::models::{bump_data_gen, Config, Part, Question, DATA_GEN};
 use crate::settings::SETTINGS;
 
 #[component]
@@ -25,22 +25,16 @@ pub fn MasterQuestionsPage(
 
                     div { class: "flex flex-wrap items-center gap-2",
                         button {
-                            class: "btn btn-sm btn-primary",
-                            onclick: move |_| {
-                                spawn(async move {
-                                    // 通常の Config 形式として読むが questions だけ使う
-                                    match Config::pick_file().await {
-                                        Ok(Some((_, cfg))) => {
-                                            msg.set(format!("{} 問をインポートしました", cfg.questions.len()));
-                                            config.write().questions = cfg.questions;
-                                            bump_data_gen();
-                                        }
-                                        Ok(None) => {}
-                                        Err(e) => msg.set(e),
-                                    }
-                                });
-                            },
-                            "Import JSON"
+                            class: "btn btn-sm",
+                            title: "問題だけを JSON ファイルに保存します",
+                            onclick: move |_| Config::save_part(config, Part::Questions, msg),
+                            "保存"
+                        }
+                        button {
+                            class: "btn btn-sm",
+                            title: "保存ファイルから問題だけを読み込みます（全体の保存ファイルからも読み込めます）",
+                            onclick: move |_| Config::load_part(config, Part::Questions, msg),
+                            "読み込み"
                         }
 
                         div { class: "flex-1" }
@@ -74,11 +68,9 @@ pub fn MasterQuestionsPage(
                     }
 
                     p { class: "text-sm opacity-70",
-                        "JSON format is the same as the normal config file. Only "
+                        "保存 / 読み込み: 問題一覧だけを JSON ファイル（"
                         code { "questions" }
-                        " will be imported; "
-                        code { "students/scores" }
-                        " are ignored."
+                        " だけを含む、全体の保存ファイルと同じ形式）でやり取りします。読み込むと問題一覧を置き換えます（点数は問題 id で対応付けられます）。"
                     }
                 }
             }

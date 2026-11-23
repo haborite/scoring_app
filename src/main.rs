@@ -5,6 +5,8 @@ use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 mod ui;
 mod models;
 mod csv_import;
+mod csv_export;
+mod report;
 mod shortcuts;
 mod settings;
 
@@ -119,7 +121,7 @@ fn App() -> Element {
                     Page::MasterQuestions => rsx! { MasterQuestionsPage { config } },
                     Page::MasterStudents => rsx! { MasterStudentsPage { config } },
                     Page::Grading => rsx! { GradingPage { config, state: grading } },
-                    Page::Rating => rsx! { RatingPage { config } },
+                    Page::Rating => rsx! { RatingPage { config, page, grading } },
                     Page::Settings => rsx! { SettingsPage { status } },
                 }
             }
