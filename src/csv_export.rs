@@ -1,10 +1,10 @@
 // Export of the results as CSV, in formats described by a user-definable `ExportFormat`.
 //
-// Formats come from two places, like the import formats:
-// - built-in formats (a plain list, UTAS, UTOL assignments)
-// - `csv_export_formats.json` in the app config directory, a JSON array of `ExportFormat`
+// Like the import formats, the formats shipped with the app are the JSON array in
+// `formats/export_formats.json`, copied to `csv_export_formats.json` in the app config directory
+// on first use; that file is then the list of formats (see `csv_import` for the details).
 //
-// Two modes:
+// Two modes, which are separate functions in the UI:
 // - "new": write a new file with the given columns, one row per student
 // - "fill": write values into a CSV downloaded from another system (e.g. the UTAS roster),
 //   matching students by id and leaving everything else of the file as it is
@@ -18,6 +18,9 @@ use crate::models::Config;
 use crate::report::{self, StudentResult};
 
 const USER_FORMATS_FILE: &str = "csv_export_formats.json";
+
+// The formats shipped with the app
+pub const DEFAULT_FORMATS_JSON: &str = include_str!("../formats/export_formats.json");
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -124,36 +127,11 @@ impl Source {
     }
 }
 
+// The formats shipped with the app, as read from `formats/export_formats.json`. Used by the
+// tests: at run time the formats come from the user's file, which is created from the same JSON.
+#[cfg(test)]
 pub fn builtin_formats() -> Vec<ExportFormat> {
-    let col = |header: &str, value: &str| ExportColumn {
-        header: header.to_string(),
-        value: value.to_string(),
-        map: BTreeMap::new(),
-    };
-    vec![
-        ExportFormat {
-            name: "成績一覧".to_string(),
-            description: "id, name, score, rating の 4 列の CSV を新しく作ります".to_string(),
-            columns: vec![col("id", "id"), col("name", "name"), col("score", "score"), col("rating", "rating")],
-            ..ExportFormat::default()
-        },
-        ExportFormat {
-            name: "UTAS".to_string(),
-            description: "UTAS の履修者名簿 CSV の「評語」列に区分を書き込みます".to_string(),
-            mode: ExportMode::Fill,
-            read_as: "UTAS".to_string(),
-            columns: vec![col("評語", "rating")],
-            ..ExportFormat::default()
-        },
-        ExportFormat {
-            name: "UTOL 課題".to_string(),
-            description: "UTOL の課題提出状況 CSV の「評価」列に最終得点を書き込みます".to_string(),
-            mode: ExportMode::Fill,
-            read_as: "UTOL 課題".to_string(),
-            columns: vec![col("評価", "score")],
-            ..ExportFormat::default()
-        },
-    ]
+    csv_import::parse_defaults(DEFAULT_FORMATS_JSON, "formats/export_formats.json")
 }
 
 pub fn user_formats_path() -> Option<PathBuf> {
@@ -161,27 +139,11 @@ pub fn user_formats_path() -> Option<PathBuf> {
 }
 
 pub fn load_formats() -> (Vec<ExportFormat>, Vec<String>) {
-    csv_import::load_with_user_file(builtin_formats(), user_formats_path(), |f| f.name.clone(), ExportFormat::validate)
+    csv_import::load_user_file(DEFAULT_FORMATS_JSON, user_formats_path(), |f| f.name.clone(), ExportFormat::validate)
 }
 
 pub fn ensure_user_formats_file() -> Result<PathBuf, String> {
-    let mut map = BTreeMap::new();
-    map.insert("不可".to_string(), "否".to_string());
-    map.insert("*".to_string(), "合".to_string());
-    let example = ExportFormat {
-        name: "カスタム形式の例".to_string(),
-        description: "列の並びと値の置き換えの例。自由に編集・追加してください".to_string(),
-        encoding: OutEncoding::ShiftJis,
-        columns: vec![
-            ExportColumn { header: "学生証番号".into(), value: "id".into(), map: BTreeMap::new() },
-            ExportColumn { header: "氏名".into(), value: "name".into(), map: BTreeMap::new() },
-            ExportColumn { header: "得点".into(), value: "score".into(), map: BTreeMap::new() },
-            ExportColumn { header: "評語".into(), value: "rating".into(), map: BTreeMap::new() },
-            ExportColumn { header: "合否".into(), value: "rating".into(), map },
-        ],
-        ..ExportFormat::default()
-    };
-    csv_import::ensure_user_file(user_formats_path(), &[example])
+    csv_import::ensure_user_file(user_formats_path(), DEFAULT_FORMATS_JSON)
 }
 
 // What an export did, for the confirmation and the message afterwards
@@ -439,12 +401,52 @@ mod tests {
 
     #[test]
     fn builtin_formats_are_valid() {
-        for f in builtin_formats() {
+        let formats = builtin_formats();
+        assert!(formats.len() > 3, "formats/export_formats.json がほとんど空です");
+        for f in &formats {
             assert_eq!(f.validate(), Ok(()), "{}", f.name);
         }
+        // Both modes are offered, since each has its own button
+        assert!(formats.iter().any(|f| f.mode == ExportMode::New));
+        assert!(formats.iter().any(|f| f.mode == ExportMode::Fill));
+        // Every fill format names an import format that exists
         let imports = csv_import::builtin_formats();
-        for f in builtin_formats().iter().filter(|f| f.mode == ExportMode::Fill) {
+        for f in formats.iter().filter(|f| f.mode == ExportMode::Fill) {
             assert!(imports.iter().any(|i| i.name == f.read_as), "{}", f.name);
+        }
+        let mut names: Vec<&str> = formats.iter().map(|f| f.name.as_str()).collect();
+        let total = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), total, "name が重複しています");
+    }
+
+    // Every shipped format is run once: new formats on the sample results, fill formats on a file
+    // in the shape of the import format they name
+    #[test]
+    fn shipped_formats_run() {
+        let cfg = cfg();
+        let imports = csv_import::builtin_formats();
+        for f in builtin_formats() {
+            match f.mode {
+                ExportMode::New => {
+                    let (bytes, report) = f.export_new(&cfg).unwrap_or_else(|e| panic!("{}: {e}", f.name));
+                    assert_eq!(report.written, cfg.students.len(), "{}", f.name);
+                    assert!(!bytes.is_empty(), "{}", f.name);
+                }
+                ExportMode::Fill => {
+                    let reader = imports.iter().find(|i| i.name == f.read_as).unwrap();
+                    let targets: Vec<&str> = f.columns.iter().map(|c| c.header.as_str()).collect();
+                    let original = csv_import::sample_file(reader, &targets, "09999999", "氏名");
+                    let (bytes, report) = f.export_fill(&cfg, original.as_bytes(), &imports)
+                        .unwrap_or_else(|e| panic!("{}: {e}\n{original}", f.name));
+                    assert_eq!(report.written, 1, "{}", f.name);
+                    assert!(report.blank.is_empty(), "{}: {:?}", f.name, report.blank);
+                    // The one student of the file got their value written into the target columns
+                    let text = String::from_utf8_lossy(&bytes).into_owned();
+                    assert!(text.len() > original.len(), "{}: {text}", f.name);
+                }
+            }
         }
     }
 

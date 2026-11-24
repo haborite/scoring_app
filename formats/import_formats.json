@@ -1,0 +1,70 @@
+[
+  {
+    "name": "UTAS",
+    "description": "東京大学 UTAS の履修者名簿（4 行目が見出し行）",
+    "skip_before_header": 3,
+    "id_header": "学生証番号",
+    "name_header": "氏名"
+  },
+  {
+    "name": "UTOL 課題",
+    "description": "東京大学 UTOL の課題提出状況 CSV（1 行目が見出し行）",
+    "id_header": "[#]学生証番号",
+    "name_header": "氏名"
+  },
+  {
+    "name": "汎用（学籍番号・氏名）",
+    "description": "1 行目が「学籍番号」「氏名」の見出しになっている CSV（Excel で作った名簿など）",
+    "id_header": "学籍番号",
+    "name_header": "氏名"
+  },
+  {
+    "name": "汎用（student_id・name）",
+    "description": "1 行目が「student_id」「name」の見出しになっている CSV",
+    "id_header": "student_id",
+    "name_header": "name"
+  },
+  {
+    "name": "Moodle 成績表",
+    "description": "Moodle の「成績 > エクスポート > プレーンテキストファイル」で出力した CSV。受験者IDはユーザプロファイルの ID 番号です",
+    "id_header": "ID number",
+    "name_header": ["Surname", "First name"]
+  },
+  {
+    "name": "Moodle 成績表（日本語）",
+    "description": "日本語表示の Moodle の成績エクスポート。見出し名は Moodle の表示言語・バージョンによって変わるので、合わなければ id_header / name_header を書き換えてください",
+    "id_header": "ID番号",
+    "name_header": ["姓", "名"]
+  },
+  {
+    "name": "Moodle 評定ワークシート",
+    "description": "Moodle の課題で「評定ワークシートをダウンロード」した CSV。受験者IDは参加者番号（Identifier、例: 参加者 123456）になります",
+    "id_header": "Identifier",
+    "name_header": "Full name"
+  },
+  {
+    "name": "Canvas 成績表",
+    "description": "Canvas LMS の成績エクスポート CSV。見出し行の次の「Points Possible」行は読み飛ばします。氏名は「姓, 名」の形で入ります",
+    "skip_after_header": 1,
+    "id_header": "SIS User ID",
+    "name_header": "Student"
+  },
+  {
+    "name": "Blackboard 成績センター",
+    "description": "Blackboard Learn の成績表ダウンロード（カンマ区切りを選択したもの）",
+    "id_header": "Student ID",
+    "name_header": ["Last Name", "First Name"]
+  },
+  {
+    "name": "WebClass 成績一覧",
+    "description": "WebClass の成績一覧ダウンロード CSV",
+    "id_header": "ユーザID",
+    "name_header": "氏名"
+  },
+  {
+    "name": "OneRoster users.csv",
+    "description": "1EdTech OneRoster v1.1 CSV の users.csv（教育データ連携の標準形式）。role が student 以外の行も読み込まれるので、不要な行は読み込み後に削除してください",
+    "id_header": "sourcedId",
+    "name_header": ["familyName", "givenName"]
+  }
+]

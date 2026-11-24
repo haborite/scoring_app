@@ -1,9 +1,10 @@
 // Import of students from CSV files described by a user-definable `CsvFormat`.
 //
-// Formats come from two places:
-// - built-in formats (UTAS, UTOL assignments)
-// - `csv_formats.json` in the app config directory, a JSON array of `CsvFormat`
-//   that users edit by hand. A user format with the same name as a built-in one replaces it.
+// The formats shipped with the app are not written in Rust: they are the JSON array in
+// `formats/import_formats.json`, which is copied to `csv_formats.json` in the app config directory
+// the first time the app needs it. From then on that file *is* the list of formats, so the formats
+// that come with the app can be edited and removed like any other. `*.default.json` next to it
+// keeps a copy of the shipped formats for reference (it is overwritten, so never edit it).
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashSet;
@@ -12,6 +13,9 @@ use std::path::{Path, PathBuf};
 use crate::models::Student;
 
 const USER_FORMATS_FILE: &str = "csv_formats.json";
+
+// The formats shipped with the app
+pub const DEFAULT_FORMATS_JSON: &str = include_str!("../formats/import_formats.json");
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum CsvEncoding {
@@ -35,6 +39,44 @@ pub enum CsvDirection {
     Columns,
 }
 
+// The name column, or several columns joined with `name_separator` (family name + given name)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum NameHeader {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl Default for NameHeader {
+    fn default() -> Self {
+        NameHeader::One(String::new())
+    }
+}
+
+impl From<&str> for NameHeader {
+    fn from(h: &str) -> Self {
+        NameHeader::One(h.to_string())
+    }
+}
+
+impl NameHeader {
+    pub fn headers(&self) -> Vec<&str> {
+        match self {
+            NameHeader::One(h) => vec![h.as_str()],
+            NameHeader::Many(hs) => hs.iter().map(String::as_str).collect(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.headers().iter().all(|h| h.trim().is_empty())
+    }
+
+    // For messages
+    fn label(&self) -> String {
+        self.headers().join(" + ")
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct CsvFormat {
@@ -50,7 +92,10 @@ pub struct CsvFormat {
     // Rows to ignore between the header and the first student
     pub skip_after_header: usize,
     pub id_header: String,
-    pub name_header: String,
+    // One header, or several that are joined (e.g. ["Surname", "First name"])
+    pub name_header: NameHeader,
+    // Between the parts of a name made of several columns
+    pub name_separator: String,
     // Trim leading/trailing whitespace (including full-width spaces) of every cell
     pub trim_whitespace: bool,
 }
@@ -67,7 +112,8 @@ impl Default for CsvFormat {
             skip_before_header: 0,
             skip_after_header: 0,
             id_header: String::new(),
-            name_header: String::new(),
+            name_header: NameHeader::default(),
+            name_separator: " ".to_string(),
             trim_whitespace: true,
         }
     }
@@ -80,78 +126,113 @@ pub struct CsvImport {
     pub warnings: Vec<String>,
 }
 
+// The formats shipped with the app, as read from `formats/import_formats.json`. Used by the
+// tests: at run time the formats come from the user's file, which is created from the same JSON.
+#[cfg(test)]
 pub fn builtin_formats() -> Vec<CsvFormat> {
-    vec![CsvFormat {
-        name: "UTAS".to_string(),
-        description: "UTAS の履修者名簿（4 行目が見出し行）".to_string(),
-        skip_before_header: 3,
-        id_header: "学生証番号".to_string(),
-        name_header: "氏名".to_string(),
-        ..CsvFormat::default()
-    }, CsvFormat {
-        name: "UTOL 課題".to_string(),
-        description: "UTOL の課題提出状況 CSV（1 行目が見出し行）".to_string(),
-        id_header: "[#]学生証番号".to_string(),
-        name_header: "氏名".to_string(),
-        ..CsvFormat::default()
-    }]
+    parse_defaults(DEFAULT_FORMATS_JSON, "formats/import_formats.json")
+}
+
+// The shipped formats of an embedded JSON file. A test checks every one of them, so a failure here
+// means the binary was built from a broken file.
+pub fn parse_defaults<T: DeserializeOwned>(json: &str, what: &str) -> Vec<T> {
+    serde_json::from_str(json.trim_start_matches('\u{feff}'))
+        .unwrap_or_else(|e| panic!("{what} is not a valid format list: {e}"))
 }
 
 pub fn user_formats_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("scoring_app").join(USER_FORMATS_FILE))
 }
 
-// Built-in formats followed by user formats. Problems with the user file are returned as messages.
+// The formats of `csv_formats.json`, created from the shipped ones when it is missing.
+// Problems with the file are returned as messages.
 pub fn load_formats() -> (Vec<CsvFormat>, Vec<String>) {
-    load_with_user_file(builtin_formats(), user_formats_path(), |f| f.name.clone(), CsvFormat::validate)
+    load_user_file(DEFAULT_FORMATS_JSON, user_formats_path(), |f| f.name.clone(), CsvFormat::validate)
 }
 
-// Built-in entries followed by the entries of a user JSON file (an array). A user entry with the
-// same name replaces the built-in one; invalid entries are skipped and reported.
-pub fn load_with_user_file<T: DeserializeOwned>(
-    builtins: Vec<T>,
+// The entries of a user JSON file (an array), which is created from `defaults_json` when missing.
+// Invalid entries are skipped and reported; if nothing usable is left, the shipped formats are
+// used so that the app keeps working whatever is in the file.
+pub fn load_user_file<T: DeserializeOwned>(
+    defaults_json: &str,
     path: Option<PathBuf>,
     name_of: fn(&T) -> String,
     validate: fn(&T) -> Result<(), String>,
 ) -> (Vec<T>, Vec<String>) {
-    let mut items = builtins;
     let mut errors = Vec::new();
-    let Some(path) = path.filter(|p| p.exists()) else {
-        return (items, errors);
+    let fallback = || parse_defaults::<T>(defaults_json, "the formats included with the app");
+    let Some(path) = path else {
+        errors.push("設定フォルダが見つかりません".to_string());
+        return (fallback(), errors);
     };
-    let user: Vec<T> = match std::fs::read_to_string(&path)
+    if let Err(e) = ensure_user_file(Some(path.clone()), defaults_json) {
+        errors.push(e);
+    }
+    let read = std::fs::read_to_string(&path)
         .map_err(|e| e.to_string())
-        .and_then(|txt| serde_json::from_str(txt.trim_start_matches('\u{feff}')).map_err(|e| e.to_string()))
-    {
+        .and_then(|txt| {
+            serde_json::from_str::<Vec<T>>(txt.trim_start_matches('\u{feff}')).map_err(|e| e.to_string())
+        });
+    let user = match read {
         Ok(v) => v,
         Err(e) => {
-            errors.push(format!("{} を読み込めませんでした: {e}", path.display()));
-            return (items, errors);
+            errors.push(format!("{} を読み込めませんでした（付属のフォーマットを使います）: {e}", path.display()));
+            return (fallback(), errors);
         }
     };
+    let mut items = Vec::new();
     for item in user {
-        let name = name_of(&item);
-        if let Err(e) = validate(&item) {
-            errors.push(format!("CSV フォーマット「{name}」を無視しました: {e}"));
-            continue;
+        match validate(&item) {
+            Ok(()) => items.push(item),
+            Err(e) => errors.push(format!("フォーマット「{}」を無視しました: {e}", name_of(&item))),
         }
-        match items.iter_mut().find(|b| name_of(b) == name) {
-            Some(existing) => *existing = item,
-            None => items.push(item),
-        }
+    }
+    if items.is_empty() {
+        errors.push(format!("{} に使えるフォーマットがないため、付属のフォーマットを使います", path.display()));
+        return (fallback(), errors);
     }
     (items, errors)
 }
 
-// Create a user format file with example entries if it does not exist. Returns its path.
-pub fn ensure_user_file<T: Serialize>(path: Option<PathBuf>, examples: &[T]) -> Result<PathBuf, String> {
+// A CSV in the shape `format` expects: the rows it skips, a header row of the id and name columns
+// plus `extra_headers`, and one student. Used by the tests of this module and of `csv_export`.
+#[cfg(test)]
+pub fn sample_file(format: &CsvFormat, extra_headers: &[&str], id: &str, name_part: &str) -> String {
+    let sep = format.delimiter.to_string();
+    let names = format.name_header.headers();
+    let mut headers: Vec<String> = vec![format.id_header.clone()];
+    headers.extend(names.iter().map(|h| h.to_string()));
+    headers.extend(extra_headers.iter().map(|h| h.to_string()));
+
+    let mut lines: Vec<String> = (0..format.skip_before_header).map(|i| format!("前書き {i}")).collect();
+    lines.push(headers.join(&sep));
+    lines.extend((0..format.skip_after_header).map(|_| vec![""; headers.len()].join(&sep)));
+    let mut cells = vec![id.to_string()];
+    cells.extend(names.iter().enumerate().map(|(i, _)| format!("{name_part}{i}")));
+    cells.extend(extra_headers.iter().map(|_| String::new()));
+    lines.push(cells.join(&sep));
+    lines.join("\r\n") + "\r\n"
+}
+
+// `<name>.default.json`, a read-only copy of the shipped formats next to the user's file
+fn defaults_copy_path(path: &Path) -> PathBuf {
+    path.with_extension("default.json")
+}
+
+// Create the user format file from `defaults_json` if it does not exist, and keep the reference
+// copy of the shipped formats next to it up to date. Returns the user file's path.
+pub fn ensure_user_file(path: Option<PathBuf>, defaults_json: &str) -> Result<PathBuf, String> {
     let path = path.ok_or("設定フォルダが見つかりません")?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
     if !path.exists() {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-        }
-        let json = serde_json::to_string_pretty(examples).map_err(|e| e.to_string())?;
-        std::fs::write(&path, json).map_err(|e| e.to_string())?;
+        std::fs::write(&path, defaults_json).map_err(|e| e.to_string())?;
+    }
+    // Rewritten when the app ships new formats, so that they can be copied into the user's file
+    let copy = defaults_copy_path(&path);
+    if std::fs::read_to_string(&copy).ok().as_deref() != Some(defaults_json) {
+        std::fs::write(&copy, defaults_json).map_err(|e| e.to_string())?;
     }
     Ok(path)
 }
@@ -168,14 +249,9 @@ pub fn open_folder(path: &Path) {
     let _ = cmd;
 }
 
-// Create the user format file with an example entry if it does not exist. Returns its path.
+// Create the user format file from the shipped formats if it does not exist. Returns its path.
 pub fn ensure_user_formats_file() -> Result<PathBuf, String> {
-    let example = CsvFormat {
-        name: "カスタム形式の例".to_string(),
-        description: "UTAS 形式を元にした例。自由に編集・追加してください".to_string(),
-        ..builtin_formats().remove(0)
-    };
-    ensure_user_file(user_formats_path(), &[example])
+    ensure_user_file(user_formats_path(), DEFAULT_FORMATS_JSON)
 }
 
 impl CsvFormat {
@@ -189,7 +265,7 @@ impl CsvFormat {
         if self.quote.is_some_and(|q| !q.is_ascii()) {
             return Err("quote には半角文字 1 文字を指定してください".to_string());
         }
-        if self.id_header.trim().is_empty() || self.name_header.trim().is_empty() {
+        if self.id_header.trim().is_empty() || self.name_header.is_empty() {
             return Err("id_header と name_header を指定してください".to_string());
         }
         Ok(())
@@ -234,6 +310,16 @@ impl CsvFormat {
         if self.trim_whitespace { c.trim().to_string() } else { c.to_string() }
     }
 
+    // The name cells joined with `name_separator`, leaving out the parts that are empty
+    fn join_name(&self, cells: &[String], idx: &[usize]) -> String {
+        let parts: Vec<&str> = idx.iter()
+            .filter_map(|&i| cells.get(i))
+            .map(String::as_str)
+            .filter(|p| !p.trim().is_empty())
+            .collect();
+        parts.join(&self.name_separator)
+    }
+
     pub fn parse(&self, bytes: &[u8]) -> Result<CsvImport, String> {
         self.validate()?;
         let text = decode(bytes, self.encoding)?;
@@ -254,11 +340,12 @@ impl CsvFormat {
         let (_, header) = iter.next().ok_or("見出し行が見つかりません（skip_before_header が大きすぎます）")?;
 
         let find = |name: &str| header.iter().position(|h| h.trim() == name.trim());
-        let (Some(id_idx), Some(name_idx)) = (find(&self.id_header), find(&self.name_header)) else {
+        let name_idx: Option<Vec<usize>> = self.name_header.headers().into_iter().map(find).collect();
+        let (Some(id_idx), Some(name_idx)) = (find(&self.id_header), name_idx) else {
             return Err(format!(
                 "見出し「{}」「{}」が見つかりません。見出し行: {}",
                 self.id_header,
-                self.name_header,
+                self.name_header.label(),
                 header.join(", "),
             ));
         };
@@ -272,7 +359,7 @@ impl CsvFormat {
                 continue;
             }
             let id = cells.get(id_idx).cloned().unwrap_or_default();
-            let name = cells.get(name_idx).cloned().unwrap_or_default();
+            let name = self.join_name(&cells, &name_idx);
             if id.trim().is_empty() {
                 warnings.push(format!("{line}{unit}: {} が空のため読み飛ばしました", self.id_header));
                 continue;
@@ -370,6 +457,96 @@ mod tests {
 
     fn ids(r: &CsvImport) -> Vec<(&str, &str)> {
         r.students.iter().map(|s| (s.id.as_str(), s.name.as_str())).collect()
+    }
+
+    #[test]
+    fn shipped_formats_are_valid_and_uniquely_named() {
+        let formats = builtin_formats();
+        assert!(formats.len() > 2, "formats/import_formats.json がほとんど空です");
+        for f in &formats {
+            assert_eq!(f.validate(), Ok(()), "{}", f.name);
+        }
+        let mut names: Vec<&str> = formats.iter().map(|f| f.name.as_str()).collect();
+        let total = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), total, "name が重複しています");
+    }
+
+    // Every shipped format is tried on a file in the shape it describes, so that a wrong
+    // skip_before_header / skip_after_header or a missing header cannot go unnoticed
+    #[test]
+    fn shipped_formats_read_a_file_of_their_own_shape() {
+        for f in builtin_formats() {
+            assert_eq!(f.direction, CsvDirection::Rows, "{}", f.name);
+            let text = sample_file(&f, &["その他"], "A001", "氏名");
+            let r = f.parse(text.as_bytes()).unwrap_or_else(|e| panic!("{}: {e}\n{text}", f.name));
+            let expected: Vec<String> = (0..f.name_header.headers().len()).map(|i| format!("氏名{i}")).collect();
+            assert_eq!(
+                ids(&r),
+                vec![("A001", expected.join(&f.name_separator).as_str())],
+                "{}: {:?}",
+                f.name,
+                r.warnings,
+            );
+        }
+    }
+
+    #[test]
+    fn user_file_is_created_from_the_shipped_formats_and_then_decides() {
+        let dir = std::env::temp_dir().join("scoring_app_test_user_formats_file");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("csv_formats.json");
+        let load = || load_user_file(
+            DEFAULT_FORMATS_JSON,
+            Some(path.clone()),
+            |f: &CsvFormat| f.name.clone(),
+            CsvFormat::validate,
+        );
+
+        // Missing: written out as it is shipped, together with the reference copy
+        let (formats, errors) = load();
+        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(formats, builtin_formats());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), DEFAULT_FORMATS_JSON);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("csv_formats.default.json")).unwrap(),
+            DEFAULT_FORMATS_JSON,
+        );
+
+        // Present: the file is the list of formats (a shipped format can be removed), and an
+        // entry that cannot be used is skipped with a message
+        std::fs::write(&path, r#"[{"name":"自作","id_header":"ID","name_header":"氏名"},{"name":"壊れた"}]"#).unwrap();
+        let (formats, errors) = load();
+        assert_eq!(formats.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), vec!["自作"]);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("壊れた"), "{errors:?}");
+
+        // Unreadable: the shipped formats keep the app usable
+        std::fs::write(&path, "{").unwrap();
+        let (formats, errors) = load();
+        assert_eq!(formats, builtin_formats());
+        assert_eq!(errors.len(), 1, "{errors:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn name_can_come_from_several_columns() {
+        let f = CsvFormat {
+            name: "t".into(),
+            id_header: "ID number".into(),
+            name_header: NameHeader::Many(vec!["Surname".into(), "First name".into()]),
+            ..CsvFormat::default()
+        };
+        let text = "First name,Surname,ID number\nHanako,Yamada,A1\n,Sato,A2\n";
+        let r = f.parse(text.as_bytes()).unwrap();
+        // The parts are joined in the order they are written, and an empty part is left out
+        assert_eq!(ids(&r), vec![("A1", "Yamada Hanako"), ("A2", "Sato")]);
+
+        // A missing name column is reported with every header it needs
+        let err = f.parse("First name,ID number\nHanako,A1\n".as_bytes()).unwrap_err();
+        assert!(err.contains("Surname + First name"), "{err}");
     }
 
     #[test]

@@ -1,0 +1,122 @@
+[
+  {
+    "name": "成績一覧",
+    "description": "id, name, score, rating の 4 列の CSV を新しく作ります",
+    "columns": [
+      { "header": "id", "value": "id" },
+      { "header": "name", "value": "name" },
+      { "header": "score", "value": "score" },
+      { "header": "rating", "value": "rating" }
+    ]
+  },
+  {
+    "name": "成績一覧（Shift_JIS）",
+    "description": "学籍番号・氏名・得点・評語の 4 列を Shift_JIS で書き出します（Excel でそのまま開けます）",
+    "encoding": "shift_jis",
+    "columns": [
+      { "header": "学籍番号", "value": "id" },
+      { "header": "氏名", "value": "name" },
+      { "header": "得点", "value": "score" },
+      { "header": "評語", "value": "rating" }
+    ]
+  },
+  {
+    "name": "UTAS",
+    "description": "東京大学 UTAS の履修者名簿 CSV の「評語」列に区分を書き込みます",
+    "mode": "fill",
+    "read_as": "UTAS",
+    "columns": [
+      { "header": "評語", "value": "rating" }
+    ]
+  },
+  {
+    "name": "UTOL 課題",
+    "description": "東京大学 UTOL の課題提出状況 CSV の「評価」列に最終得点を書き込みます",
+    "mode": "fill",
+    "read_as": "UTOL 課題",
+    "columns": [
+      { "header": "評価", "value": "score" }
+    ]
+  },
+  {
+    "name": "Moodle 成績インポート",
+    "description": "Moodle の「成績 > インポート > CSV ファイル」で取り込む CSV を作ります。取り込み時に ID number を照合列、得点を評定項目に割り当ててください",
+    "columns": [
+      { "header": "ID number", "value": "id" },
+      { "header": "氏名", "value": "name" },
+      { "header": "得点", "value": "score" },
+      { "header": "評語", "value": "rating" }
+    ]
+  },
+  {
+    "name": "Moodle 評定ワークシート",
+    "description": "Moodle の課題からダウンロードした評定ワークシートの「Grade」列に得点を書き込みます（そのまま「評定ワークシートをアップロード」できます）",
+    "mode": "fill",
+    "read_as": "Moodle 評定ワークシート",
+    "columns": [
+      { "header": "Grade", "value": "score" }
+    ]
+  },
+  {
+    "name": "Canvas 成績表",
+    "description": "Canvas LMS の成績エクスポート CSV の課題列に得点を書き込みます。header の「<課題名>」を実際の列の見出し（例: 期末試験 (1234567)）に書き換えてから使ってください",
+    "mode": "fill",
+    "read_as": "Canvas 成績表",
+    "columns": [
+      { "header": "<課題名>", "value": "score" }
+    ]
+  },
+  {
+    "name": "Blackboard 成績センター",
+    "description": "Blackboard Learn の成績表ダウンロード CSV の成績列に得点を書き込みます。header の「<列名>」を実際の列の見出し（例: 期末試験 [Total Pts: 100 Score]）に書き換えてから使ってください",
+    "mode": "fill",
+    "read_as": "Blackboard 成績センター",
+    "columns": [
+      { "header": "<列名>", "value": "score" }
+    ]
+  },
+  {
+    "name": "WebClass 外部データインポート",
+    "description": "WebClass の「外部データのインポート」で取り込む CSV（user_id, score の 2 列）を作ります",
+    "columns": [
+      { "header": "user_id", "value": "id" },
+      { "header": "score", "value": "score" }
+    ]
+  },
+  {
+    "name": "manaba 成績登録シート貼り付け用",
+    "description": "manaba の成績登録シート（Excel）に貼り付けるための CSV。manaba へは Excel ファイルをアップロードするため、学籍番号の並びを合わせて「#合計点」「#評価」列に貼り付けてください",
+    "encoding": "shift_jis",
+    "columns": [
+      { "header": "学籍番号", "value": "id" },
+      { "header": "氏名", "value": "name" },
+      { "header": "#合計点", "value": "score" },
+      { "header": "#評価", "value": "rating" }
+    ]
+  },
+  {
+    "name": "OneRoster results.csv",
+    "description": "1EdTech OneRoster v1.1 CSV の results.csv を作ります。lineItemSourcedId（課題の ID）と日付の列は空なので、取り込む前に補ってください",
+    "columns": [
+      { "header": "sourcedId", "value": "id" },
+      { "header": "status", "value": "literal:active" },
+      { "header": "dateLastModified", "value": "literal:" },
+      { "header": "lineItemSourcedId", "value": "literal:" },
+      { "header": "studentSourcedId", "value": "id" },
+      { "header": "scoreStatus", "value": "literal:fully graded" },
+      { "header": "score", "value": "score" },
+      { "header": "scoreDate", "value": "literal:" },
+      { "header": "comment", "value": "literal:" }
+    ]
+  },
+  {
+    "name": "合否一覧",
+    "description": "区分を合否に置き換えて書き出す例（map の使い方）。自由に編集・追加してください",
+    "columns": [
+      { "header": "学籍番号", "value": "id" },
+      { "header": "氏名", "value": "name" },
+      { "header": "得点", "value": "score" },
+      { "header": "合否", "value": "rating", "map": { "不可": "否", "*": "合" } }
+    ]
+  }
+]

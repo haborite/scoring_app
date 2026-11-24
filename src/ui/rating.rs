@@ -676,37 +676,33 @@ fn StudentList(
     }
 }
 
+// The two export modes are separate functions: making a new CSV, and writing into a CSV that was
+// downloaded from another system. Each has its own formats and its own button.
 #[component]
 fn ExportBar(config: Signal<Config>, msg: Signal<String>) -> Element {
     let formats = use_signal(Vec::<ExportFormat>::new);
-    let mut selected = use_signal(|| "UTAS".to_string());
     use_hook(move || reload_formats(formats, msg));
 
-    let description = formats.read().iter().find(|f| f.name == selected()).map(|f| f.description.clone()).unwrap_or_default();
-
     rsx! {
-        div { class: "flex items-center gap-1",
-            select {
-                class: "select select-sm w-40",
-                title: "{description}",
-                // Re-read on focus so edits to csv_export_formats.json apply without restarting
-                onfocus: move |_| reload_formats(formats, msg),
-                onchange: move |e| selected.set(e.value()),
-                for f in formats() {
-                    option { value: "{f.name}", selected: f.name == selected(), title: "{f.description}", "{f.name}" }
-                }
+        div { class: "flex flex-wrap items-center gap-x-2 gap-y-1",
+            ExportGroup {
+                mode: ExportMode::New,
+                label: "新規作成",
+                button_label: "CSV を作成...",
+                hint: "指定した列だけの CSV を新しく作ります",
+                formats,
+                config,
+                msg,
             }
-            button {
-                class: "btn btn-sm btn-primary",
-                title: "{description}",
-                onclick: move |_| {
-                    let format = formats.read().iter().find(|f| f.name == selected()).cloned();
-                    match format {
-                        Some(f) => run_export(f, config, msg),
-                        None => msg.set("エクスポートのフォーマットを選択してください".to_string()),
-                    }
-                },
-                "エクスポート"
+            div { class: "divider divider-horizontal mx-0 h-6" }
+            ExportGroup {
+                mode: ExportMode::Fill,
+                label: "既存ファイルに記入",
+                button_label: "CSV に記入...",
+                hint: "他のシステムからダウンロードした CSV を選び、受験者IDで照合して指定の列だけを書き込みます",
+                formats,
+                config,
+                msg,
             }
             button {
                 class: "btn btn-sm btn-ghost",
@@ -719,6 +715,73 @@ fn ExportBar(config: Signal<Config>, msg: Signal<String>) -> Element {
                     Err(e) => msg.set(e),
                 },
                 "定義..."
+            }
+        }
+    }
+}
+
+// One mode: its formats and the button that runs it
+#[component]
+fn ExportGroup(
+    mode: ExportMode,
+    label: &'static str,
+    button_label: &'static str,
+    hint: &'static str,
+    formats: Signal<Vec<ExportFormat>>,
+    config: Signal<Config>,
+    msg: Signal<String>,
+) -> Element {
+    let mut selected = use_signal(String::new);
+
+    let list: Vec<ExportFormat> = formats.read().iter().filter(|f| f.mode == mode).cloned().collect();
+    // Falls back to the first format of this mode while nothing is selected (or after an edit
+    // of the definition file removed the selected one)
+    let current = list.iter()
+        .find(|f| f.name == selected())
+        .or_else(|| list.first())
+        .cloned();
+    let title = match &current {
+        Some(f) if !f.description.is_empty() => format!("{hint}\n\n{}: {}", f.name, f.description),
+        _ => hint.to_string(),
+    };
+
+    rsx! {
+        div { class: "flex items-center gap-1",
+            span { class: "text-xs opacity-70 whitespace-nowrap", title: "{hint}", "{label}" }
+            select {
+                class: "select select-sm w-44",
+                title: "{title}",
+                // Re-read on focus so edits to csv_export_formats.json apply without restarting
+                onfocus: move |_| reload_formats(formats, msg),
+                onchange: move |e| selected.set(e.value()),
+                for f in list.iter() {
+                    option {
+                        value: "{f.name}",
+                        selected: Some(&f.name) == current.as_ref().map(|c| &c.name),
+                        title: "{f.description}",
+                        "{f.name}"
+                    }
+                }
+            }
+            button {
+                class: "btn btn-sm btn-primary",
+                title: "{title}",
+                disabled: current.is_none(),
+                onclick: move |_| {
+                    let name = selected();
+                    let all = formats.read();
+                    // Same fallback as the select: the first format of this mode
+                    let format = all.iter()
+                        .find(|f| f.mode == mode && f.name == name)
+                        .or_else(|| all.iter().find(|f| f.mode == mode))
+                        .cloned();
+                    drop(all);
+                    match format {
+                        Some(f) => run_export(f, config, msg),
+                        None => msg.set("この方式のエクスポートフォーマットがありません".to_string()),
+                    }
+                },
+                "{button_label}"
             }
         }
     }

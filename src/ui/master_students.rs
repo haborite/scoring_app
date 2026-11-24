@@ -48,12 +48,23 @@ pub fn MasterStudentsPage(
                                 // Re-read on focus so edits to csv_formats.json apply without restarting
                                 onfocus: move |_| reload_csv_formats(csv_formats, msg),
                                 onchange: move |e| csv_format_name.set(e.value()),
-                                for f in csv_formats() {
-                                    option {
-                                        value: "{f.name}",
-                                        selected: f.name == csv_format_name(),
-                                        title: "{f.description}",
-                                        "{f.name}"
+                                {
+                                    let list = csv_formats();
+                                    // The first format stands in while nothing is selected, or
+                                    // when an edit of the definition file removed the selection
+                                    let current = list.iter()
+                                        .find(|f| f.name == csv_format_name())
+                                        .or_else(|| list.first())
+                                        .map(|f| f.name.clone());
+                                    rsx! {
+                                        for f in list.iter() {
+                                            option {
+                                                value: "{f.name}",
+                                                selected: current.as_deref() == Some(f.name.as_str()),
+                                                title: "{f.description}",
+                                                "{f.name}"
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -61,9 +72,12 @@ pub fn MasterStudentsPage(
                                 class: "btn btn-sm btn-primary",
                                 onclick: move |_| {
                                     spawn(async move {
-                                        let format = csv_formats.read().iter()
-                                            .find(|f| f.name == csv_format_name())
-                                            .cloned();
+                                        let format = {
+                                            let all = csv_formats.read();
+                                            let name = csv_format_name();
+                                            // Same fallback as the select
+                                            all.iter().find(|f| f.name == name).or_else(|| all.first()).cloned()
+                                        };
                                         let Some(format) = format else {
                                             msg.set("CSV フォーマットを選択してください".to_string());
                                             return;
